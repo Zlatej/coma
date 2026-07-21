@@ -1,3 +1,5 @@
+// Package coma limits how many goroutines run concurrently and waits
+// for all of them to finish.
 package coma
 
 import (
@@ -45,8 +47,8 @@ func (c *concurrencyManager) Wait() {
 
 func (c *concurrencyManager) Done() {
 	<-c.sem
-	c.wg.Done()
 	c.runningCnt.Add(-1)
+	c.wg.Done()
 }
 
 func (c *concurrencyManager) WaitAllDone() {
