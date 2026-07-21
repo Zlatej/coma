@@ -1,6 +1,8 @@
 # coma
 
-a tiny concurrency manager for go
+*a tiny concurrency manager for go*
+
+coma makes sure your program doesn't get overwhelmed with goroutines and fall into a coma.
 
 1. limits how many goroutines run at once
 2. waits until all of them are done
