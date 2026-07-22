@@ -21,14 +21,18 @@ go get github.com/zlatej/coma
 cm := coma.New(5) // at most 5 goroutines at a time
 
 for _, task := range tasks {
-    cm.Wait() // blocks until a slot is free
+    // blocks until a slot is free and acquires it
+    if err := cm.AcquireContext(ctx); err != nil {
+        // error means either the context is closed or Wait has been called
+        return
+    } 
     go func(t Task) {
-        defer cm.Done() // marks done
+        defer cm.Release() // releases slot
         process(t)
     }(task)
 }
 
-cm.WaitAllDone() // blocks until all are marked as done
+cm.Wait() // blocks until all slots are released
 ```
 
 ## license

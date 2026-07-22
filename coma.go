@@ -8,10 +8,10 @@ import (
 	"sync/atomic"
 )
 
-// ErrClosed is returned by Wait and WaitContext when WaitAllDone has been called.
+// ErrClosed is returned by Acquire and AcquireContext when Wait has been called.
 var ErrClosed = errors.New("coma: manager is shut down")
 
-// ConcurrencyManager limits how many goroutines can run concurrently
+// ConcurrencyManager limits how many goroutines can run concurrently.
 type ConcurrencyManager struct {
 	sem        chan struct{}
 	closed     chan struct{}
@@ -29,9 +29,9 @@ func New(max int32) *ConcurrencyManager {
 	}
 }
 
-// Wait blocks until a slot is available and claims it for a new goroutine.
-// In case WaitAllDone has been called, Wait returns ErrClosed.
-func (c *ConcurrencyManager) Wait() error {
+// Acquire blocks until a slot is available and claims it for a new goroutine.
+// If Wait has been called, Acquire returns ErrClosed.
+func (c *ConcurrencyManager) Acquire() error {
 	select {
 	case c.sem <- struct{}{}:
 		c.runningCnt.Add(1)
@@ -41,9 +41,9 @@ func (c *ConcurrencyManager) Wait() error {
 	}
 }
 
-// WaitContext blocks until a slot is available and claims it for a new goroutine,
-// or returns ctx.Err() if the context is done first. If WaitAllDone has been called WaitContext returns ErrClosed.
-func (c *ConcurrencyManager) WaitContext(ctx context.Context) error {
+// AcquireContext blocks until a slot is available and claims it for a new goroutine,
+// or returns ctx.Err() if the context is done first. If Wait has been called, AcquireContext returns ErrClosed.
+func (c *ConcurrencyManager) AcquireContext(ctx context.Context) error {
 	select {
 	case c.sem <- struct{}{}:
 		c.runningCnt.Add(1)
@@ -55,15 +55,15 @@ func (c *ConcurrencyManager) WaitContext(ctx context.Context) error {
 	}
 }
 
-// Done marks a goroutine as finished and releases one slot.
-func (c *ConcurrencyManager) Done() {
+// Release marks a goroutine as finished and releases one slot.
+func (c *ConcurrencyManager) Release() {
 	<-c.sem
 	c.runningCnt.Add(-1)
 }
 
-// WaitAllDone waits until all goroutines are done. WaitAllDone is terminal, meaning ConcurrencyManager
-// cannot be reused. It must be called at most once, from a single goroutine, a second call panics.
-func (c *ConcurrencyManager) WaitAllDone() {
+// Wait waits until all goroutines are done. Wait is terminal, meaning ConcurrencyManager
+// cannot be reused. It must be called at most once, from a single goroutine; a second call panics.
+func (c *ConcurrencyManager) Wait() {
 	close(c.closed)
 	for range c.max {
 		c.sem <- struct{}{}
