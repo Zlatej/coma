@@ -61,9 +61,15 @@ func (c *ConcurrencyManager) Release() {
 	c.runningCnt.Add(-1)
 }
 
-// Wait waits until all goroutines are done. Wait is terminal, meaning ConcurrencyManager
-// cannot be reused. It must be called at most once, from a single goroutine; a second call panics.
+// Wait waits until all goroutines are done. Wait is terminal, meaning ConcurrencyManager cannot be reused.
+// Wait is not safe for concurrent use - calling it from multiple goroutines at once may panic.
+// A repeated call from the same goroutine is a safe no-op.
 func (c *ConcurrencyManager) Wait() {
+	select {
+	case <-c.closed:
+		return
+	default:
+	}
 	close(c.closed)
 	for range c.max {
 		c.sem <- struct{}{}
