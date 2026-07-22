@@ -4,7 +4,6 @@ package coma
 
 import (
 	"context"
-	"sync"
 	"sync/atomic"
 )
 
@@ -29,7 +28,6 @@ type ConcurrencyManager interface {
 
 type coMa struct {
 	sem        chan struct{}
-	wg         sync.WaitGroup
 	max        int32
 	runningCnt atomic.Int32
 }
@@ -38,7 +36,6 @@ type coMa struct {
 func New(max int32) ConcurrencyManager {
 	return &coMa{
 		sem:        make(chan struct{}, max),
-		wg:         sync.WaitGroup{},
 		max:        max,
 		runningCnt: atomic.Int32{},
 	}
@@ -46,14 +43,12 @@ func New(max int32) ConcurrencyManager {
 
 func (c *coMa) Wait() {
 	c.sem <- struct{}{}
-	c.wg.Add(1)
 	c.runningCnt.Add(1)
 }
 
 func (c *coMa) WaitContext(ctx context.Context) error {
 	select {
 	case c.sem <- struct{}{}:
-		c.wg.Add(1)
 		c.runningCnt.Add(1)
 		return nil
 	case <-ctx.Done():
@@ -64,11 +59,12 @@ func (c *coMa) WaitContext(ctx context.Context) error {
 func (c *coMa) Done() {
 	<-c.sem
 	c.runningCnt.Add(-1)
-	c.wg.Done()
 }
 
 func (c *coMa) WaitAllDone() {
-	c.wg.Wait()
+	for range c.max {
+		c.sem <- struct{}{}
+	}
 }
 
 func (c *coMa) RunningCount() int32 {
