@@ -1,5 +1,4 @@
-// Package coma limits how many goroutines run concurrently and waits
-// for all of them to finish.
+// Package coma limits how many goroutines run concurrently and waits for all of them to finish.
 package coma
 
 import (
@@ -15,7 +14,7 @@ var ErrClosed = errors.New("coma: manager is shut down")
 type ConcurrencyManager struct {
 	sem     chan struct{}
 	closed  chan struct{}
-	penging int
+	pending int
 	mu      sync.Mutex
 	cond    *sync.Cond
 }
@@ -40,14 +39,14 @@ func (c *ConcurrencyManager) Acquire() error {
 		return ErrClosed
 	default:
 	}
-	c.penging++
+	c.pending++
 	c.mu.Unlock()
 
 	select {
 	case c.sem <- struct{}{}:
 		return nil
 	case <-c.closed:
-		c.decrementPenging()
+		c.decrementPending()
 		return ErrClosed
 	}
 }
@@ -62,24 +61,24 @@ func (c *ConcurrencyManager) AcquireContext(ctx context.Context) error {
 		return ErrClosed
 	default:
 	}
-	c.penging++
+	c.pending++
 	c.mu.Unlock()
 
 	select {
 	case c.sem <- struct{}{}:
 		return nil
 	case <-ctx.Done():
-		c.decrementPenging()
+		c.decrementPending()
 		return ctx.Err()
 	case <-c.closed:
-		c.decrementPenging()
+		c.decrementPending()
 		return ErrClosed
 	}
 }
 
 // Release marks a goroutine as finished and releases one slot.
 func (c *ConcurrencyManager) Release() {
-	c.decrementPenging()
+	c.decrementPending()
 	<-c.sem
 }
 
@@ -93,7 +92,7 @@ func (c *ConcurrencyManager) Wait() {
 	default:
 		close(c.closed)
 	}
-	for c.penging > 0 {
+	for c.pending > 0 {
 		c.cond.Wait()
 	}
 	c.mu.Unlock()
@@ -104,10 +103,10 @@ func (c *ConcurrencyManager) RunningCount() int {
 	return len(c.sem)
 }
 
-func (c *ConcurrencyManager) decrementPenging() {
+func (c *ConcurrencyManager) decrementPending() {
 	c.mu.Lock()
-	c.penging--
-	if c.penging == 0 {
+	c.pending--
+	if c.pending == 0 {
 		c.cond.Broadcast()
 	}
 	c.mu.Unlock()
