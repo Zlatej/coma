@@ -32,6 +32,8 @@ for _, task := range tasks {
     }(task)
 }
 
+fmt.Printf("currently running %d goroutines\n", cm.RunningCount())
+
 cm.Wait() // blocks until all slots are released
 ```
 
@@ -40,7 +42,8 @@ no context? use `cm.Acquire()` instead
 ## notes
 
 - `Wait` is terminal: once called, the manager cannot be reused, `Acquire`/`AcquireContext` will return `ErrClosed`.
-- calling `Wait` again from the same goroutine is a safe no-op, however calling it concurrently from multiple goroutines may panic.
+- `Wait` can safely be called any number of times, including concurrently from multiple goroutines.
+- every successful `Acquire`/`AcquireContext` must be matched by exactly one `Release`.
 
 ## license
 
