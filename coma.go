@@ -32,15 +32,9 @@ func New(max int) *ConcurrencyManager {
 // Acquire blocks until a slot is available and claims it for a new goroutine.
 // If Wait has been called, Acquire returns ErrClosed.
 func (c *ConcurrencyManager) Acquire() error {
-	c.mu.Lock()
-	select {
-	case <-c.closed:
-		c.mu.Unlock()
-		return ErrClosed
-	default:
+	if err := c.incrementPending(); err != nil {
+		return err
 	}
-	c.pending++
-	c.mu.Unlock()
 
 	select {
 	case c.sem <- struct{}{}:
@@ -54,15 +48,9 @@ func (c *ConcurrencyManager) Acquire() error {
 // AcquireContext blocks until a slot is available and claims it for a new goroutine,
 // or returns ctx.Err() if the context is done first. If Wait has been called, AcquireContext returns ErrClosed.
 func (c *ConcurrencyManager) AcquireContext(ctx context.Context) error {
-	c.mu.Lock()
-	select {
-	case <-c.closed:
-		c.mu.Unlock()
-		return ErrClosed
-	default:
+	if err := c.incrementPending(); err != nil {
+		return err
 	}
-	c.pending++
-	c.mu.Unlock()
 
 	select {
 	case c.sem <- struct{}{}:
@@ -83,8 +71,7 @@ func (c *ConcurrencyManager) Release() {
 }
 
 // Wait waits until all goroutines are done. Wait is terminal, meaning ConcurrencyManager cannot be reused.
-// Wait is not safe for concurrent use - calling it from multiple goroutines at once may panic.
-// A repeated call from the same goroutine is a safe no-op.
+// Wait is safe for concurrent use. A repeated call is a safe no-op.
 func (c *ConcurrencyManager) Wait() {
 	c.mu.Lock()
 	select {
@@ -103,10 +90,23 @@ func (c *ConcurrencyManager) RunningCount() int {
 	return len(c.sem)
 }
 
+func (c *ConcurrencyManager) incrementPending() error {
+	c.mu.Lock()
+	select {
+	case <-c.closed:
+		c.mu.Unlock()
+		return ErrClosed
+	default:
+	}
+	c.pending++
+	c.mu.Unlock()
+	return nil
+}
+
 func (c *ConcurrencyManager) decrementPending() {
 	c.mu.Lock()
 	c.pending--
-	if c.pending == 0 {
+	if c.pending <= 0 {
 		c.cond.Broadcast()
 	}
 	c.mu.Unlock()
