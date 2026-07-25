@@ -90,6 +90,7 @@ func (c *ConcurrencyManager) RunningCount() int {
 	return len(c.sem)
 }
 
+// incrementPending locks the manager and increments pending, if Wait hasn't been called, else returns ErrClosed.
 func (c *ConcurrencyManager) incrementPending() error {
 	c.mu.Lock()
 	select {
@@ -103,6 +104,8 @@ func (c *ConcurrencyManager) incrementPending() error {
 	return nil
 }
 
+// decrementPending locks the manager and decrements pending.
+// If there are no other pending goroutines, broadcasts the information.
 func (c *ConcurrencyManager) decrementPending() {
 	c.mu.Lock()
 	c.pending--
