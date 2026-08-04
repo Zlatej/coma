@@ -7,7 +7,7 @@ import (
 	"sync"
 )
 
-// ErrClosed is returned by Acquire and AcquireContext when Wait has been called.
+// ErrClosed is returned by [ConcurrencyManager.Acquire] and [ConcurrencyManager.AcquireContext] when Wait has been called.
 var ErrClosed = errors.New("coma: manager is shut down")
 
 // ConcurrencyManager limits how many goroutines can run concurrently.
@@ -46,7 +46,8 @@ func (c *ConcurrencyManager) Acquire() error {
 }
 
 // AcquireContext blocks until a slot is available and claims it for a new goroutine,
-// or returns ctx.Err() if the context is done first. If Wait has been called, AcquireContext returns ErrClosed.
+// or returns ctx.Err() if the context is done first. If Wait has been called, [ConcurrencyManager.AcquireContext]
+// returns [ErrClosed].
 func (c *ConcurrencyManager) AcquireContext(ctx context.Context) error {
 	if err := c.incrementPending(); err != nil {
 		return err
@@ -90,7 +91,7 @@ func (c *ConcurrencyManager) RunningCount() int {
 	return len(c.sem)
 }
 
-// incrementPending locks the manager and increments pending, if Wait hasn't been called, else returns ErrClosed.
+// incrementPending locks the manager and increments pending, if Wait hasn't been called, else returns [ErrClosed].
 func (c *ConcurrencyManager) incrementPending() error {
 	c.mu.Lock()
 	select {
