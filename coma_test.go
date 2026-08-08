@@ -243,3 +243,145 @@ func TestRunningCount(t *testing.T) {
 		}
 	})
 }
+
+func TestWait(t *testing.T) {
+	t.Run("close blocked Acquires", func(t *testing.T) {
+		cm := New(1)
+		var wg sync.WaitGroup
+		if err := cm.Acquire(); err != nil {
+			t.Errorf("Acquire: %v", err)
+		}
+
+		wg.Go(func() {
+			if err := cm.Acquire(); !errors.Is(err, ErrClosed) {
+				t.Error("Acquire did not return ErrClosed")
+			}
+		})
+
+		wg.Go(func() {
+			if err := cm.AcquireContext(context.Background()); !errors.Is(err, ErrClosed) {
+				t.Error("AcquireContext did not return ErrClosed")
+			}
+		})
+
+		time.Sleep(50 * time.Millisecond)
+		go func() {
+			cm.Wait()
+		}()
+		<-cm.closed
+		cm.Release()
+		wg.Wait()
+	})
+	t.Run("closing", func(t *testing.T) {
+		cm := New(limit)
+		cm.Wait()
+		acqErr := make(chan error)
+
+		go func() {
+			acqErr <- cm.Acquire()
+		}()
+		select {
+		case err := <-acqErr:
+			if !errors.Is(err, ErrClosed) {
+				t.Errorf("Acquire returned %v instead of ErrClosed", err)
+			}
+		case <-time.After(100 * time.Millisecond):
+			t.Error("Acquire blocked after closing Wait()")
+		}
+
+		go func() {
+			acqErr <- cm.AcquireContext(context.Background())
+		}()
+		select {
+		case err := <-acqErr:
+			if !errors.Is(err, ErrClosed) {
+				t.Errorf("AcquireContext returned %v instead of ErrClosed", err)
+			}
+		case <-time.After(100 * time.Millisecond):
+			t.Error("Acquire blocked after closing Wait()")
+		}
+	})
+	t.Run("called multiple times", func(t *testing.T) {
+		cm := New(limit)
+		if err := cm.Acquire(); err != nil {
+			t.Errorf("Acquire: %v", err)
+		}
+		var wg sync.WaitGroup
+
+		done1 := make(chan bool, 1)
+		done2 := make(chan bool, 1)
+		done3 := make(chan bool, 1)
+
+		wg.Go(func() {
+			cm.Wait()
+			done1 <- true
+		})
+		wg.Go(func() {
+			cm.Wait()
+			done2 <- true
+		})
+		wg.Go(func() {
+			cm.Wait()
+			done3 <- true
+		})
+
+		select {
+		case <-done1:
+			t.Error("first Wait call did not block")
+		case <-done2:
+			t.Error("second Wait call did not block")
+		case <-done3:
+			t.Error("third Wait call did not block")
+		case <-time.After(300 * time.Millisecond):
+		}
+
+		cm.Release()
+		wg.Wait()
+	})
+	t.Run("waits", func(t *testing.T) {
+		cm := New(limit)
+		var done atomic.Bool
+
+		if err := cm.Acquire(); err != nil {
+			t.Errorf("Acquire: %v", err)
+		}
+		go func() {
+			defer cm.Release()
+			time.Sleep(100 * time.Millisecond)
+			done.Store(true)
+		}()
+
+		cm.Wait()
+		if !done.Load() {
+			t.Error("goroutine is not done")
+		}
+	})
+	t.Run("concurrent calls", func(t *testing.T) {
+		cm := New(limit)
+		var done atomic.Bool
+		var wg sync.WaitGroup
+
+		if err := cm.Acquire(); err != nil {
+			t.Errorf("Acquire: %v", err)
+		}
+		go func() {
+			defer cm.Release()
+			time.Sleep(100 * time.Millisecond)
+			done.Store(true)
+		}()
+
+		for range 3 {
+			wg.Go(func() {
+				cm.Wait()
+				if !done.Load() {
+					t.Error("goroutine is not done")
+				}
+			})
+		}
+		cm.Wait()
+		if !done.Load() {
+			t.Error("goroutine is not done")
+		}
+		wg.Wait()
+	})
+}
