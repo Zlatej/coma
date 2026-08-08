@@ -14,7 +14,9 @@ const limit = 3
 func TestAcquire(t *testing.T) {
 	cm := New(limit)
 	for range limit {
-		cm.Acquire()
+		if err := cm.Acquire(); err != nil {
+			t.Errorf("Acquire: %v", err)
+		}
 	}
 
 	acqErr := make(chan error)
@@ -50,11 +52,12 @@ func TestAcquire(t *testing.T) {
 }
 
 func TestAcquireContext(t *testing.T) {
-	const limit = 3
 	cm := New(limit)
 	ctx, cancel := context.WithCancel(context.Background())
 	for range limit {
-		cm.Acquire()
+		if err := cm.Acquire(); err != nil {
+			t.Errorf("Acquire: %v", err)
+		}
 	}
 
 	acqErr := make(chan error)
