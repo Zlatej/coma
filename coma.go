@@ -67,8 +67,8 @@ func (c *ConcurrencyManager) AcquireContext(ctx context.Context) error {
 
 // Release marks a goroutine as finished and releases one slot.
 func (c *ConcurrencyManager) Release() {
-	c.decrementPending()
 	<-c.sem
+	c.decrementPending()
 }
 
 // Wait waits until all goroutines are done. Wait is terminal, meaning ConcurrencyManager cannot be reused.
