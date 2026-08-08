@@ -118,18 +118,19 @@ func TestRelease(t *testing.T) {
 	// other options are implicitely tested in other tests
 	t.Run("Release - nothing to release", func(t *testing.T) {
 		cm := New(limit)
-		done := atomic.Bool{}
+		done := make(chan bool)
 		go func() {
 			cm.Release()
-			done.Store(true)
+			done <- true
 		}()
 
-		if !done.Load() {
-			time.Sleep(time.Second)
-			if done.Load() {
-				t.Error("Release notblocked when nothing to release")
-			}
+		select {
+		case <-done:
+			t.Error("Release should block when there is nothing to release")
+		case <-time.After(100 * time.Millisecond):
+			// expected
 		}
+
 	})
 }
 
