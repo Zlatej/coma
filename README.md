@@ -1,5 +1,7 @@
 # coma
 
+> a more robust implementation is almost done in the [`mutex-cond-impl`](https://github.com/Zlatej/coma/tree/mutex-cond-impl) branch.
+
 *a tiny concurrency manager for go*
 
 coma makes sure your program doesn't get overwhelmed with goroutines and fall into a coma.
