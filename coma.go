@@ -20,7 +20,12 @@ type ConcurrencyManager struct {
 }
 
 // New creates a ConcurrencyManager that allows at most max concurrently running goroutines.
+// A max < 1 is treated as 1.
 func New(max int) *ConcurrencyManager {
+	if max < 1 {
+		max = 1
+	}
+
 	c := &ConcurrencyManager{
 		sem:    make(chan struct{}, max),
 		closed: make(chan struct{}),

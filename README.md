@@ -41,6 +41,7 @@ no context? use `cm.Acquire()` instead
 
 ## notes
 
+- `New` treats a `max` of less than 1 as 1.
 - `Wait` is terminal: once called, the manager cannot be reused, `Acquire`/`AcquireContext` will return `ErrClosed`.
 - `Wait` can safely be called any number of times, including concurrently from multiple goroutines.
 - every successful `Acquire`/`AcquireContext` must be matched by exactly one `Release`.

@@ -11,6 +11,44 @@ import (
 
 const limit = 3
 
+func TestNew(t *testing.T) {
+	for _, max := range []int{1, 0, -1} {
+		cm := New(max)
+
+		firstErr := make(chan error, 1)
+		go func() {
+			firstErr <- cm.Acquire()
+		}()
+
+		select {
+		case err := <-firstErr:
+			if err != nil {
+				t.Fatalf("New(%d): Acquire: %v", max, err)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("New(%d): Acquire blocked, max was not round up to 1", max)
+		}
+
+		if cnt := cm.RunningCount(); cnt != 1 {
+			t.Errorf("New(%d): RunningCount=%d, want 1", max, cnt)
+		}
+
+		secondErr := make(chan error, 1)
+		go func() {
+			secondErr <- cm.Acquire()
+		}()
+
+		select {
+		case err := <-secondErr:
+			t.Errorf("New(%d): second Acquire returned err=%v, should block at limit 1", max, err)
+		case <-time.After(100 * time.Millisecond):
+			// expected
+		}
+
+		cm.Release()
+	}
+}
+
 func TestAcquire(t *testing.T) {
 	cm := New(limit)
 	for range limit {
@@ -130,7 +168,6 @@ func TestRelease(t *testing.T) {
 		case <-time.After(100 * time.Millisecond):
 			// expected
 		}
-
 	})
 }
 
@@ -218,7 +255,6 @@ func TestRunningCount(t *testing.T) {
 		if cnt := cm.RunningCount(); cnt != 0 {
 			t.Errorf("RunningCount is %d, should be 0", cnt)
 		}
-
 	})
 	t.Run("ctx cancel", func(t *testing.T) {
 		cm := New(limit)
