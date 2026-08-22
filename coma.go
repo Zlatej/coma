@@ -71,6 +71,11 @@ func (c *ConcurrencyManager) AcquireContext(ctx context.Context) error {
 }
 
 // Release marks a goroutine as finished and releases one slot.
+// Every successful Acquire or AcquireContext must be matched by exactly one Release.
+//
+// Release blocks only while no slot is held at all. An unmatched Release made while other goroutines hold slots takes
+// one of theirs instead of blocking, which lets the limit be exceeded and can make Wait return before those goroutines
+// finish. The Release whose slot has been taken then blocks in its place.
 func (c *ConcurrencyManager) Release() {
 	<-c.sem
 	c.decrementPending()
