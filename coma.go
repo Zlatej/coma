@@ -91,7 +91,9 @@ func (c *ConcurrencyManager) Wait() {
 	c.mu.Unlock()
 }
 
-// RunningCount returns the number of currently running goroutines.
+// RunningCount returns the number of currently held slots: those for which Acquire or AcquireContext returned nil
+// and Release has not yet been called.
+// Goroutines blocked in Acquire are not counted, so this is not necessarily the number of goroutines running.
 func (c *ConcurrencyManager) RunningCount() int {
 	return len(c.sem)
 }
