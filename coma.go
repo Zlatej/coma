@@ -7,7 +7,8 @@ import (
 	"sync"
 )
 
-// ErrClosed is returned by [ConcurrencyManager.Acquire] and [ConcurrencyManager.AcquireContext] when Wait has been called.
+// ErrClosed is returned by [ConcurrencyManager.Acquire] and [ConcurrencyManager.AcquireContext]
+// when [ConcurrencyManager.Wait] has been called.
 var ErrClosed = errors.New("coma: manager is shut down")
 
 // ConcurrencyManager limits how many goroutines can run concurrently.
@@ -19,7 +20,7 @@ type ConcurrencyManager struct {
 	cond    *sync.Cond
 }
 
-// New creates a ConcurrencyManager that allows at most max concurrently running goroutines.
+// New creates a [ConcurrencyManager] that allows at most max concurrently running goroutines.
 // A max < 1 is treated as 1.
 func New(max int) *ConcurrencyManager {
 	if max < 1 {
@@ -35,7 +36,7 @@ func New(max int) *ConcurrencyManager {
 }
 
 // Acquire blocks until a slot is available and claims it for a new goroutine.
-// If Wait has been called, Acquire returns ErrClosed.
+// If [ConcurrencyManager.Wait] has been called, Acquire returns [ErrClosed].
 func (c *ConcurrencyManager) Acquire() error {
 	if err := c.incrementPending(); err != nil {
 		return err
@@ -51,8 +52,8 @@ func (c *ConcurrencyManager) Acquire() error {
 }
 
 // AcquireContext blocks until a slot is available and claims it for a new goroutine,
-// or returns ctx.Err() if the context is done first. If Wait has been called, [ConcurrencyManager.AcquireContext]
-// returns [ErrClosed].
+// or returns ctx.Err() if the context is done first.
+// If [ConcurrencyManager.Wait] has been called, AcquireContext returns [ErrClosed].
 func (c *ConcurrencyManager) AcquireContext(ctx context.Context) error {
 	if err := c.incrementPending(); err != nil {
 		return err
@@ -71,17 +72,18 @@ func (c *ConcurrencyManager) AcquireContext(ctx context.Context) error {
 }
 
 // Release marks a goroutine as finished and releases one slot.
-// Every successful Acquire or AcquireContext must be matched by exactly one Release.
+// Every successful [ConcurrencyManager.Acquire] or [ConcurrencyManager.AcquireContext] must be matched
+// by exactly one Release.
 //
 // Release blocks only while no slot is held at all. An unmatched Release made while other goroutines hold slots takes
-// one of theirs instead of blocking, which lets the limit be exceeded and can make Wait return before those goroutines
-// finish. The Release whose slot has been taken then blocks in its place.
+// one of theirs instead of blocking, which lets the limit be exceeded and can make [ConcurrencyManager.Wait] return
+// before those goroutines finish. The Release whose slot has been taken then blocks in its place.
 func (c *ConcurrencyManager) Release() {
 	<-c.sem
 	c.decrementPending()
 }
 
-// Wait waits until all goroutines are done. Wait is terminal, meaning ConcurrencyManager cannot be reused.
+// Wait waits until all goroutines are done. Wait is terminal, meaning [ConcurrencyManager] cannot be reused.
 // Wait is safe for concurrent use. A repeated call is a safe no-op.
 func (c *ConcurrencyManager) Wait() {
 	c.mu.Lock()
@@ -96,14 +98,15 @@ func (c *ConcurrencyManager) Wait() {
 	c.mu.Unlock()
 }
 
-// RunningCount returns the number of currently held slots: those for which Acquire or AcquireContext returned nil
-// and Release has not yet been called.
+// RunningCount returns the number of currently held slots: those for which [ConcurrencyManager.Acquire] or
+// [ConcurrencyManager.AcquireContext] returned nil and [ConcurrencyManager.Release] has not yet been called.
 // Goroutines blocked in Acquire are not counted, so this is not necessarily the number of goroutines running.
 func (c *ConcurrencyManager) RunningCount() int {
 	return len(c.sem)
 }
 
-// incrementPending locks the manager and increments pending, if Wait hasn't been called, else returns [ErrClosed].
+// incrementPending locks the manager and increments pending,
+// if [ConcurrencyManager.Wait] hasn't been called, else returns [ErrClosed].
 func (c *ConcurrencyManager) incrementPending() error {
 	c.mu.Lock()
 	select {
