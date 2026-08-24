@@ -25,11 +25,11 @@ for _, task := range tasks {
     if err := cm.AcquireContext(ctx); err != nil {
         // error means either the context is done or Wait has been called
         return
-    } 
-    go func(t Task) {
+    }
+    go func() {
         defer cm.Release() // releases slot
-        process(t)
-    }(task)
+        process(task)
+    }()
 }
 
 fmt.Printf("currently running %d goroutines\n", cm.RunningCount())
