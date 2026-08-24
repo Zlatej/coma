@@ -1,5 +1,8 @@
 # coma
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/zlatej/coma.svg)](https://pkg.go.dev/github.com/zlatej/coma)
+[![Go](https://github.com/zlatej/coma/actions/workflows/go.yml/badge.svg)](https://github.com/zlatej/coma/actions/workflows/go.yml)
+
 *a tiny concurrency manager for go*
 
 coma makes sure your program doesn't get overwhelmed with goroutines and fall into a coma.
@@ -48,4 +51,4 @@ no context? use `cm.Acquire()` instead
 
 ## license
 
-MIT
+[MIT](LICENSE)
