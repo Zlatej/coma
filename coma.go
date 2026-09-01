@@ -51,10 +51,13 @@ func (c *ConcurrencyManager) Acquire() error {
 	}
 }
 
-// AcquireContext blocks until a slot is available and claims it for a new goroutine,
-// or returns ctx.Err() if the context is done first.
-// If [ConcurrencyManager.Wait] has been called, AcquireContext returns [ErrClosed].
+// AcquireContext blocks until a slot is available and claims it for a new goroutine.
+// If context.Done() has been closed ctx.Err() is returned and if [ConcurrencyManager.Wait] has already been called,
+// AcquireContext returns [ErrClosed].
 func (c *ConcurrencyManager) AcquireContext(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := c.incrementPending(); err != nil {
 		return err
 	}

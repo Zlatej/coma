@@ -50,43 +50,88 @@ func TestNew(t *testing.T) {
 }
 
 func TestAcquire(t *testing.T) {
-	cm := New(limit)
-	for range limit {
-		if err := cm.Acquire(); err != nil {
-			t.Errorf("Acquire: %v", err)
+	t.Run("basic functionality", func(t *testing.T) {
+		cm := New(limit)
+		for range limit {
+			if err := cm.Acquire(); err != nil {
+				t.Errorf("Acquire: %v", err)
+			}
 		}
-	}
 
-	acqErr := make(chan error)
-	go func() {
-		acqErr <- cm.Acquire()
-	}()
+		acqErr := make(chan error)
+		go func() {
+			acqErr <- cm.Acquire()
+		}()
 
-	// blocked
-	select {
-	case err := <-acqErr:
-		t.Errorf("Acquire returned instead of blocking, err=%v", err)
-	case <-time.After(100 * time.Millisecond):
-		// expected
-	}
-	if actual := cm.RunningCount(); actual != limit {
-		t.Errorf("RunningCount=%d should be equal to limit=%d", actual, limit)
-	}
-
-	cm.Release()
-
-	// acquired
-	select {
-	case err := <-acqErr:
-		if err != nil {
-			t.Error("after Release Acquire returned error, should return nil")
+		// blocked
+		select {
+		case err := <-acqErr:
+			t.Errorf("Acquire returned instead of blocking, err=%v", err)
+		case <-time.After(100 * time.Millisecond):
+			// expected
 		}
-	case <-time.After(time.Second):
-		t.Errorf("Acquire seems to be blocked even after a slot was released")
-	}
-	if actual := cm.RunningCount(); actual != limit {
-		t.Errorf("after Release RunningCount=%d should be equal to limit=%d", actual, limit)
-	}
+		if actual := cm.RunningCount(); actual != limit {
+			t.Errorf("RunningCount=%d should be equal to limit=%d", actual, limit)
+		}
+
+		cm.Release()
+
+		// acquired
+		select {
+		case err := <-acqErr:
+			if err != nil {
+				t.Error("after Release Acquire returned error, should return nil")
+			}
+		case <-time.After(time.Second):
+			t.Errorf("Acquire seems to be blocked even after a slot was released")
+		}
+		if actual := cm.RunningCount(); actual != limit {
+			t.Errorf("after Release RunningCount=%d should be equal to limit=%d", actual, limit)
+		}
+	})
+	t.Run("after Wait called", func(t *testing.T) {
+		var (
+			cm        = New(5)
+			ctx       = context.Background()
+			total     = 2000
+			failed    = 0
+			failedCtx = 0
+		)
+		cm.Wait()
+		for range total {
+			if err := cm.Acquire(); err == nil {
+				failed++
+				cm.Release()
+			}
+			if errCtx := cm.AcquireContext(ctx); errCtx == nil {
+				failedCtx++
+				cm.Release()
+			}
+		}
+		if failed != 0 || failedCtx != 0 {
+			t.Errorf("acquired a slot after wait, total calls: %d, Acquire: %d, AcquireContext: %d",
+				total, failed, failedCtx)
+		}
+	})
+
+	t.Run("after Context canceled", func(t *testing.T) {
+		var (
+			cm        = New(5)
+			total     = 2000
+			failedCtx = 0
+		)
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		for range total {
+			if errCtx := cm.AcquireContext(ctx); errCtx == nil {
+				failedCtx++
+				cm.Release()
+			}
+		}
+		if failedCtx != 0 {
+			t.Errorf("acquired a slot after ctx canceled, total calls: %d, AcquireContext: %d", total, failedCtx)
+		}
+	})
 }
 
 func TestAcquireContext(t *testing.T) {
