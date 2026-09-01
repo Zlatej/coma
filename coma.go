@@ -78,11 +78,16 @@ func (c *ConcurrencyManager) AcquireContext(ctx context.Context) error {
 // Every successful [ConcurrencyManager.Acquire] or [ConcurrencyManager.AcquireContext] must be matched
 // by exactly one Release.
 //
-// Release blocks only while no slot is held at all. An unmatched Release made while other goroutines hold slots takes
-// one of theirs instead of blocking, which lets the limit be exceeded and can make [ConcurrencyManager.Wait] return
-// before those goroutines finish. The Release whose slot has been taken then blocks in its place.
+// Release panics when no slot is held at all.
+// An unmatched Release called while other goroutines are holding slots takes one of theirs instead, which allows
+// the limit to be exceeded and can make [ConcurrencyManager.Wait] return before those goroutines finish.
+// A later Release then panics in its place.
 func (c *ConcurrencyManager) Release() {
-	<-c.sem
+	select {
+	case <-c.sem:
+	default:
+		panic("coma: Release called when there are no slots to released")
+	}
 	c.decrementPending()
 }
 
