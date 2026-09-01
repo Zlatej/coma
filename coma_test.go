@@ -198,21 +198,37 @@ func TestAcquireContext(t *testing.T) {
 }
 
 func TestRelease(t *testing.T) {
-	// other options are implicitely tested in other tests
-	t.Run("Release - nothing to release", func(t *testing.T) {
+	t.Run("base usage", func(t *testing.T) {
 		cm := New(limit)
-		done := make(chan bool)
-		go func() {
-			cm.Release()
-			done <- true
-		}()
-
-		select {
-		case <-done:
-			t.Error("Release should block when there is nothing to release")
-		case <-time.After(100 * time.Millisecond):
-			// expected
+		want := 0
+		for i, step := range []int{+1, -1, +1, -1, +1, +1, -1, +1, +1, -1, -1, -1} {
+			if step > 0 {
+				if err := cm.Acquire(); err != nil {
+					t.Fatalf("step %d: Acquire: %v", i, err)
+				}
+			} else {
+				cm.Release()
+			}
+			want += step
+			if got := cm.RunningCount(); got != want {
+				t.Fatalf("step %d: RunningCount=%d, want %d", i, got, want)
+			}
 		}
+		if got := cm.RunningCount(); got != 0 {
+			t.Errorf("all releases were called, but %d is still held", got)
+		}
+	})
+	t.Run("nothing to release", func(t *testing.T) {
+		cm := New(limit)
+		mustPanic(t, cm.Release, "Release")
+	})
+	t.Run("double release", func(t *testing.T) {
+		cm := New(limit)
+		if err := cm.Acquire(); err != nil {
+			t.Fatalf("Acquire: %v", err)
+		}
+		cm.Release()
+		mustPanic(t, cm.Release, "second Release")
 	})
 }
 
@@ -469,4 +485,15 @@ func TestWait(t *testing.T) {
 		}
 		wg.Wait()
 	})
+}
+
+func mustPanic(t *testing.T, f func(), what string) (p any) {
+	t.Helper()
+	defer func() {
+		if p = recover(); p == nil {
+			t.Errorf("%s: expected a panic, got none", what)
+		}
+	}()
+	f()
+	return p
 }
