@@ -3,7 +3,7 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/zlatej/coma.svg)](https://pkg.go.dev/github.com/zlatej/coma)
 [![Go](https://github.com/zlatej/coma/actions/workflows/go.yml/badge.svg)](https://github.com/zlatej/coma/actions/workflows/go.yml)
 
-*a tiny concurrency manager for go*
+_a tiny concurrency manager for go_
 
 coma makes sure your program doesn't get overwhelmed with goroutines and fall into a coma.
 
@@ -47,7 +47,7 @@ no context? use `cm.Acquire()` instead
 - `New` treats a `max` of less than 1 as 1.
 - `Wait` is terminal: once called, the manager cannot be reused, `Acquire`/`AcquireContext` will return `ErrClosed`.
 - `Wait` can safely be called any number of times, including concurrently from multiple goroutines.
-- every successful `Acquire`/`AcquireContext` must be matched by exactly one `Release`.
+- every successful `Acquire`/`AcquireContext` must be matched by exactly one `Release`. An unmatched `Release` panics when no slot is held.
 
 ## license
 
