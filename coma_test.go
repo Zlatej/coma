@@ -351,6 +351,98 @@ func TestRunningCount(t *testing.T) {
 	})
 }
 
+func TestClose(t *testing.T) {
+	t.Run("closed while acquiring", func(t *testing.T) {
+		cm := New(1)
+		var wg sync.WaitGroup
+		if err := cm.Acquire(); err != nil {
+			t.Errorf("Acquire: %v", err)
+		}
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := cm.Acquire(); !errors.Is(err, ErrClosed) {
+				t.Error("Acquire did not return ErrClosed")
+			}
+		}()
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := cm.AcquireContext(context.Background()); !errors.Is(err, ErrClosed) {
+				t.Error("AcquireContext did not return ErrClosed")
+			}
+		}()
+
+		time.Sleep(50 * time.Millisecond)
+		cm.Close()
+		<-cm.closed
+		cm.Release()
+		wg.Wait()
+	})
+	t.Run("already closed", func(t *testing.T) {
+		cm := New(limit)
+		cm.Close()
+		acqErr := make(chan error)
+		<-cm.closed
+
+		go func() {
+			acqErr <- cm.Acquire()
+		}()
+		select {
+		case err := <-acqErr:
+			if !errors.Is(err, ErrClosed) {
+				t.Errorf("Acquire returned %v instead of ErrClosed", err)
+			}
+		case <-time.After(100 * time.Millisecond):
+			t.Error("Acquire blocked after closing")
+		}
+
+		go func() {
+			acqErr <- cm.AcquireContext(context.Background())
+		}()
+		select {
+		case err := <-acqErr:
+			if !errors.Is(err, ErrClosed) {
+				t.Errorf("AcquireContext returned %v instead of ErrClosed", err)
+			}
+		case <-time.After(100 * time.Millisecond):
+			t.Error("Acquire blocked after closing")
+		}
+	})
+	t.Run("called multiple times", func(t *testing.T) {
+		cm := New(limit)
+		if err := cm.Acquire(); err != nil {
+			t.Errorf("Acquire: %v", err)
+		}
+
+		cm.Close()
+		cm.Close()
+		cm.Close()
+
+		cm.Release()
+		cm.Wait()
+	})
+	t.Run("concurrent calls", func(t *testing.T) {
+		for range 200 {
+			cm := New(limit)
+			var wg sync.WaitGroup
+			start := make(chan struct{})
+			for range 8 {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					<-start
+					cm.Close()
+				}()
+			}
+			close(start)
+			wg.Wait()
+		}
+	})
+}
+
 func TestWait(t *testing.T) {
 	t.Run("close blocked Acquires", func(t *testing.T) {
 		cm := New(1)
@@ -477,6 +569,7 @@ func TestWait(t *testing.T) {
 		cm := New(limit)
 		var done atomic.Bool
 		var wg sync.WaitGroup
+		start := make(chan struct{})
 
 		if err := cm.Acquire(); err != nil {
 			t.Errorf("Acquire: %v", err)
@@ -487,20 +580,18 @@ func TestWait(t *testing.T) {
 			done.Store(true)
 		}()
 
-		for range 3 {
+		for range 20 {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
+				<-start
 				cm.Wait()
 				if !done.Load() {
 					t.Error("goroutine is not done")
 				}
 			}()
 		}
-		cm.Wait()
-		if !done.Load() {
-			t.Error("goroutine is not done")
-		}
+		close(start)
 		wg.Wait()
 	})
 }
