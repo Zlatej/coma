@@ -268,7 +268,9 @@ func TestRunningCount(t *testing.T) {
 		var done atomic.Bool
 		var peak atomic.Int32
 
-		monitor.Go(func() {
+		monitor.Add(1)
+		go func() {
+			defer monitor.Done()
 			for !done.Load() {
 				if cnt := cm.RunningCount(); cnt < 0 || cnt > limit {
 					t.Errorf("RunningCount=%d exceeded the limit=%d", cnt, limit)
@@ -278,16 +280,18 @@ func TestRunningCount(t *testing.T) {
 				}
 				time.Sleep(5 * time.Millisecond)
 			}
-		})
+		}()
 
 		for range limit * 3 {
-			workers.Go(func() {
+			workers.Add(1)
+			go func() {
+				defer workers.Done()
 				if err := cm.Acquire(); err != nil {
 					t.Errorf("Acquire: %v", err)
 				}
 				time.Sleep(100 * time.Millisecond)
 				cm.Release()
-			})
+			}()
 		}
 
 		workers.Wait()
@@ -322,7 +326,9 @@ func TestRunningCount(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 
 		var wg sync.WaitGroup
-		wg.Go(func() {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
 			for {
 				if err := cm.AcquireContext(ctx); err != nil {
 					return
@@ -332,7 +338,7 @@ func TestRunningCount(t *testing.T) {
 					time.Sleep(time.Millisecond)
 				}()
 			}
-		})
+		}()
 
 		time.Sleep(30 * time.Millisecond)
 		cancel()
@@ -353,17 +359,21 @@ func TestWait(t *testing.T) {
 			t.Errorf("Acquire: %v", err)
 		}
 
-		wg.Go(func() {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
 			if err := cm.Acquire(); !errors.Is(err, ErrClosed) {
 				t.Error("Acquire did not return ErrClosed")
 			}
-		})
+		}()
 
-		wg.Go(func() {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
 			if err := cm.AcquireContext(context.Background()); !errors.Is(err, ErrClosed) {
 				t.Error("AcquireContext did not return ErrClosed")
 			}
-		})
+		}()
 
 		time.Sleep(50 * time.Millisecond)
 		go func() {
@@ -413,18 +423,24 @@ func TestWait(t *testing.T) {
 		done2 := make(chan bool, 1)
 		done3 := make(chan bool, 1)
 
-		wg.Go(func() {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
 			cm.Wait()
 			done1 <- true
-		})
-		wg.Go(func() {
+		}()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
 			cm.Wait()
 			done2 <- true
-		})
-		wg.Go(func() {
+		}()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
 			cm.Wait()
 			done3 <- true
-		})
+		}()
 
 		select {
 		case <-done1:
@@ -472,12 +488,14 @@ func TestWait(t *testing.T) {
 		}()
 
 		for range 3 {
-			wg.Go(func() {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
 				cm.Wait()
 				if !done.Load() {
 					t.Error("goroutine is not done")
 				}
-			})
+			}()
 		}
 		cm.Wait()
 		if !done.Load() {
