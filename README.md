@@ -42,11 +42,38 @@ cm.Wait() // blocks until all slots are released
 
 no context? use `cm.Acquire()` instead
 
+## remote graceful shutdown
+
+if you want to close the ConcurrencyManager from one place, but still wait until all tasks are done in a different place.
+
+```go
+cm := coma.New(5) // at most 5 goroutines at a time
+
+go func() {
+    <-sigint
+    cm.Close() // close from remote call
+}()
+
+for {
+    task := getTask()
+    if err := cm.Acquire(); err != nil { // returns ErrClosed after cm.Close()
+        break
+    }
+    go func() {
+        defer cm.Release()
+        process(task)
+    }()
+}
+
+cm.Wait() // already closed, just wait until all slots are released
+```
+
 ## notes
 
 - `New` treats a `max` of less than 1 as 1.
-- `Wait` is terminal: once called, the manager cannot be reused, `Acquire`/`AcquireContext` will return `ErrClosed`.
-- `Wait` can safely be called any number of times, including concurrently from multiple goroutines.
+- `Close` is terminal: once called, the manager cannot be reused, `Acquire`/`AcquireContext` will return `ErrClosed`.
+- `Wait` behaves like `Close` but then blocks until all slots are released.
+- `Wait` and `Close` can be combined and can safely be called any number of times, including concurrently from multiple goroutines.
 - every successful `Acquire`/`AcquireContext` must be matched by exactly one `Release`. An unmatched `Release` panics when no slot is held.
 
 ## license
