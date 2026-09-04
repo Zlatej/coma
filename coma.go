@@ -8,7 +8,7 @@ import (
 )
 
 // ErrClosed is returned by [ConcurrencyManager.Acquire] and [ConcurrencyManager.AcquireContext]
-// when [ConcurrencyManager.Wait] has been called.
+// when [ConcurrencyManager.Close] or [ConcurrencyManager.Wait] has been called.
 var ErrClosed = errors.New("coma: manager is shut down")
 
 // ConcurrencyManager limits how many goroutines can run concurrently.
@@ -36,7 +36,7 @@ func New(max int) *ConcurrencyManager {
 }
 
 // Acquire blocks until a slot is available and claims it for a new goroutine.
-// If [ConcurrencyManager.Wait] has been called, Acquire returns [ErrClosed].
+// If [ConcurrencyManager] has been closed, Acquire returns [ErrClosed].
 func (c *ConcurrencyManager) Acquire() error {
 	if err := c.incrementPending(); err != nil {
 		return err
@@ -52,7 +52,7 @@ func (c *ConcurrencyManager) Acquire() error {
 }
 
 // AcquireContext blocks until a slot is available and claims it for a new goroutine.
-// If context.Done() has been closed ctx.Err() is returned and if [ConcurrencyManager.Wait] has already been called,
+// If context.Done() has been closed ctx.Err() is returned and if [ConcurrencyManager] has already been closed,
 // AcquireContext returns [ErrClosed].
 func (c *ConcurrencyManager) AcquireContext(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
@@ -86,24 +86,28 @@ func (c *ConcurrencyManager) Release() {
 	select {
 	case <-c.sem:
 	default:
-		panic("coma: Release called when there are no slots to released")
+		panic("coma: Release called when there are no slots to release")
 	}
 	c.decrementPending()
 }
 
-// Wait waits until all goroutines are done. Wait is terminal, meaning [ConcurrencyManager] cannot be reused.
-// Wait is safe for concurrent use. A repeated call is a safe no-op.
+// Close closes [ConcurrencyManager] so it stops accepting acquires. Close is terminal, meaning ConcurrencyManager
+// cannot be reused, but [ConcurrencyManager.Wait] still can be called.
+func (c *ConcurrencyManager) Close() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.closeLocked()
+}
+
+// Wait closes [ConcurrencyManager] and waits until all goroutines are done. Wait is terminal,
+// meaning ConcurrencyManager cannot be reused. Wait is safe for concurrent use. A repeated call is a safe no-op.
 func (c *ConcurrencyManager) Wait() {
 	c.mu.Lock()
-	select {
-	case <-c.closed:
-	default:
-		close(c.closed)
-	}
+	defer c.mu.Unlock()
+	c.closeLocked()
 	for c.pending > 0 {
 		c.cond.Wait()
 	}
-	c.mu.Unlock()
 }
 
 // RunningCount returns the number of currently held slots: those for which [ConcurrencyManager.Acquire] or
@@ -114,7 +118,7 @@ func (c *ConcurrencyManager) RunningCount() int {
 }
 
 // incrementPending locks the manager and increments pending,
-// if [ConcurrencyManager.Wait] hasn't been called, else returns [ErrClosed].
+// if [ConcurrencyManager] hasn't been closed, else returns [ErrClosed].
 func (c *ConcurrencyManager) incrementPending() error {
 	c.mu.Lock()
 	select {
@@ -137,4 +141,13 @@ func (c *ConcurrencyManager) decrementPending() {
 		c.cond.Broadcast()
 	}
 	c.mu.Unlock()
+}
+
+// closeLocked closes the c.closed channel if not already closed. c.mu must be locked by caller.
+func (c *ConcurrencyManager) closeLocked() {
+	select {
+	case <-c.closed:
+	default:
+		close(c.closed)
+	}
 }
