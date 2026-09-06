@@ -7,12 +7,12 @@ import (
 	"sync"
 )
 
-// ErrClosed is returned by [ConcurrencyManager.Acquire] and [ConcurrencyManager.AcquireContext]
-// when [ConcurrencyManager.Close] or [ConcurrencyManager.Wait] has been called.
-var ErrClosed = errors.New("coma: manager is shut down")
+// ErrClosed is returned by [Gate.Acquire] and [Gate.AcquireContext]
+// when [Gate.Close] or [Gate.Wait] has been called.
+var ErrClosed = errors.New("coma: gate is closed")
 
-// ConcurrencyManager limits how many goroutines can run concurrently.
-type ConcurrencyManager struct {
+// Gate limits how many goroutines can run concurrently.
+type Gate struct {
 	sem     chan struct{}
 	closed  chan struct{}
 	pending int
@@ -20,107 +20,107 @@ type ConcurrencyManager struct {
 	cond    *sync.Cond
 }
 
-// New creates a [ConcurrencyManager] that allows at most max concurrently running goroutines.
+// New creates a [Gate] that allows at most max concurrently running goroutines.
 // A max < 1 is treated as 1.
-func New(max int) *ConcurrencyManager {
+func New(max int) *Gate {
 	if max < 1 {
 		max = 1
 	}
 
-	c := &ConcurrencyManager{
+	g := &Gate{
 		sem:    make(chan struct{}, max),
 		closed: make(chan struct{}),
 	}
-	c.cond = sync.NewCond(&c.mu)
-	return c
+	g.cond = sync.NewCond(&g.mu)
+	return g
 }
 
 // Acquire blocks until a slot is available and claims it for a new goroutine.
-// If [ConcurrencyManager] has been closed, Acquire returns [ErrClosed].
-func (c *ConcurrencyManager) Acquire() error {
-	if err := c.incrementPending(); err != nil {
+// If [Gate] has been closed, Acquire returns [ErrClosed].
+func (g *Gate) Acquire() error {
+	if err := g.incrementPending(); err != nil {
 		return err
 	}
 
 	select {
-	case c.sem <- struct{}{}:
+	case g.sem <- struct{}{}:
 		return nil
-	case <-c.closed:
-		c.decrementPending()
+	case <-g.closed:
+		g.decrementPending()
 		return ErrClosed
 	}
 }
 
 // AcquireContext blocks until a slot is available and claims it for a new goroutine.
-// If context.Done() has been closed ctx.Err() is returned and if [ConcurrencyManager] has already been closed,
+// If context.Done() has been closed ctx.Err() is returned and if [Gate] has already been closed,
 // AcquireContext returns [ErrClosed].
-func (c *ConcurrencyManager) AcquireContext(ctx context.Context) error {
+func (g *Gate) AcquireContext(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := c.incrementPending(); err != nil {
+	if err := g.incrementPending(); err != nil {
 		return err
 	}
 
 	select {
-	case c.sem <- struct{}{}:
+	case g.sem <- struct{}{}:
 		return nil
 	case <-ctx.Done():
-		c.decrementPending()
+		g.decrementPending()
 		return ctx.Err()
-	case <-c.closed:
-		c.decrementPending()
+	case <-g.closed:
+		g.decrementPending()
 		return ErrClosed
 	}
 }
 
 // Release marks a goroutine as finished and releases one slot.
-// Every successful [ConcurrencyManager.Acquire] or [ConcurrencyManager.AcquireContext] must be matched
+// Every successful [Gate.Acquire] or [Gate.AcquireContext] must be matched
 // by exactly one Release.
 //
 // Release panics when no slot is held at all.
 // An unmatched Release called while other goroutines are holding slots takes one of theirs instead, which allows
-// the limit to be exceeded and can make [ConcurrencyManager.Wait] return before those goroutines finish.
+// the limit to be exceeded and can make [Gate.Wait] return before those goroutines finish.
 // A later Release then panics in its place.
-func (c *ConcurrencyManager) Release() {
+func (g *Gate) Release() {
 	select {
-	case <-c.sem:
+	case <-g.sem:
 	default:
 		panic("coma: Release called when there are no slots to release")
 	}
-	c.decrementPending()
+	g.decrementPending()
 }
 
-// Close closes [ConcurrencyManager] so it stops accepting acquires. Close is terminal, meaning ConcurrencyManager
-// cannot be reused, but [ConcurrencyManager.Wait] still can be called.
-func (c *ConcurrencyManager) Close() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.closeLocked()
+// Close closes [Gate] so it stops accepting acquires. Close is terminal, meaning Gate
+// cannot be reused, but [Gate.Wait] still can be called.
+func (g *Gate) Close() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.closeLocked()
 }
 
-// Wait closes [ConcurrencyManager] and waits until all goroutines are done. Wait is terminal,
-// meaning ConcurrencyManager cannot be reused. Wait is safe for concurrent use. A repeated call is a safe no-op.
-func (c *ConcurrencyManager) Wait() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.closeLocked()
-	for c.pending > 0 {
-		c.cond.Wait()
+// Wait closes [Gate] and waits until all goroutines are done. Wait is terminal,
+// meaning Gate cannot be reused. Wait is safe for concurrent use. A repeated call is a safe no-op.
+func (g *Gate) Wait() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.closeLocked()
+	for g.pending > 0 {
+		g.cond.Wait()
 	}
 }
 
-// RunningCount returns the number of currently held slots: those for which [ConcurrencyManager.Acquire] or
-// [ConcurrencyManager.AcquireContext] returned nil and [ConcurrencyManager.Release] has not yet been called.
+// RunningCount returns the number of currently held slots: those for which [Gate.Acquire] or
+// [Gate.AcquireContext] returned nil and [Gate.Release] has not yet been called.
 // Goroutines blocked in Acquire are not counted, so this is not necessarily the number of goroutines running.
-func (c *ConcurrencyManager) RunningCount() int {
-	return len(c.sem)
+func (g *Gate) RunningCount() int {
+	return len(g.sem)
 }
 
 // Go calls Acquire, if it succeeds, calls f in a new goroutine. When f returns, Release is called.
 // If f panics, Release is not called and the panic propagates as usual.
-func (c *ConcurrencyManager) Go(f func()) error {
-	if err := c.Acquire(); err != nil {
+func (g *Gate) Go(f func()) error {
+	if err := g.Acquire(); err != nil {
 		return err
 	}
 	go func() {
@@ -132,7 +132,7 @@ func (c *ConcurrencyManager) Go(f func()) error {
 				panic(x)
 			}
 
-			c.Release()
+			g.Release()
 		}()
 		f()
 	}()
@@ -141,8 +141,8 @@ func (c *ConcurrencyManager) Go(f func()) error {
 
 // GoContext calls AcquireContext, if it succeeds, calls f in a new goroutine. When f returns, Release is called.
 // If f panics, Release is not called and the panic propagates as usual.
-func (c *ConcurrencyManager) GoContext(ctx context.Context, f func()) error {
-	if err := c.AcquireContext(ctx); err != nil {
+func (g *Gate) GoContext(ctx context.Context, f func()) error {
+	if err := g.AcquireContext(ctx); err != nil {
 		return err
 	}
 	go func() {
@@ -154,44 +154,44 @@ func (c *ConcurrencyManager) GoContext(ctx context.Context, f func()) error {
 				panic(x)
 			}
 
-			c.Release()
+			g.Release()
 		}()
 		f()
 	}()
 	return nil
 }
 
-// incrementPending locks the manager and increments pending,
-// if [ConcurrencyManager] hasn't been closed, else returns [ErrClosed].
-func (c *ConcurrencyManager) incrementPending() error {
-	c.mu.Lock()
+// incrementPending locks the [Gate] and increments pending,
+// if Gate hasn't been closed, else returns [ErrClosed].
+func (g *Gate) incrementPending() error {
+	g.mu.Lock()
 	select {
-	case <-c.closed:
-		c.mu.Unlock()
+	case <-g.closed:
+		g.mu.Unlock()
 		return ErrClosed
 	default:
 	}
-	c.pending++
-	c.mu.Unlock()
+	g.pending++
+	g.mu.Unlock()
 	return nil
 }
 
-// decrementPending locks the manager and decrements pending.
+// decrementPending locks the [Gate] and decrements pending.
 // If there are no other pending goroutines, broadcasts the information.
-func (c *ConcurrencyManager) decrementPending() {
-	c.mu.Lock()
-	c.pending--
-	if c.pending <= 0 {
-		c.cond.Broadcast()
+func (g *Gate) decrementPending() {
+	g.mu.Lock()
+	g.pending--
+	if g.pending <= 0 {
+		g.cond.Broadcast()
 	}
-	c.mu.Unlock()
+	g.mu.Unlock()
 }
 
 // closeLocked closes the c.closed channel if not already closed. c.mu must be locked by caller.
-func (c *ConcurrencyManager) closeLocked() {
+func (g *Gate) closeLocked() {
 	select {
-	case <-c.closed:
+	case <-g.closed:
 	default:
-		close(c.closed)
+		close(g.closed)
 	}
 }
