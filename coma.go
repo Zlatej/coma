@@ -117,6 +117,28 @@ func (c *ConcurrencyManager) RunningCount() int {
 	return len(c.sem)
 }
 
+// Go calls Acquire, if it succeeds, calls f in a new goroutine. When f returns, Release is called.
+// If f panics, Release is not called and the panic propagates as usual.
+func (c *ConcurrencyManager) Go(f func()) error {
+	if err := c.Acquire(); err != nil {
+		return err
+	}
+	go func() {
+		defer func() {
+			if x := recover(); x != nil {
+				// f panicked. Calling Release here could wake Wait while the panic is still processing.
+				// Wait would race the panic and potentially even exit the process before the panic completes.
+				// So we don't call Release and let the panic complete. Same behavior as sync.WaitGroup.Go().
+				panic(x)
+			}
+
+			c.Release()
+		}()
+		f()
+	}()
+	return nil
+}
+
 // incrementPending locks the manager and increments pending,
 // if [ConcurrencyManager] hasn't been closed, else returns [ErrClosed].
 func (c *ConcurrencyManager) incrementPending() error {
