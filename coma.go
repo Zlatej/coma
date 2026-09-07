@@ -20,6 +20,11 @@ type Gate struct {
 	cond    *sync.Cond
 }
 
+// ConcurrencyManager limits how many goroutines can run concurrently.
+//
+// Deprecated: use [Gate] instead
+type ConcurrencyManager = Gate
+
 // New creates a [Gate] that allows at most max concurrently running goroutines.
 // A max < 1 is treated as 1.
 func New(max int) *Gate {
