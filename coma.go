@@ -79,6 +79,27 @@ func (g *Gate) AcquireContext(ctx context.Context) error {
 	}
 }
 
+// TryAcquire acquires the slot without blocking.
+// On success, returns true. On failure, returns false and leaves the [Gate] unchanged.
+func (g *Gate) TryAcquire() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	select {
+	case <-g.closed:
+		return false
+	default:
+	}
+
+	select {
+	case g.sem <- struct{}{}:
+		g.pending++
+		return true
+	default:
+		return false
+	}
+}
+
 // Release marks a goroutine as finished and releases one slot.
 // Every successful [Gate.Acquire] or [Gate.AcquireContext] must be matched
 // by exactly one Release.

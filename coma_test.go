@@ -225,6 +225,62 @@ func TestAcquireContextTimeout(t *testing.T) {
 	}
 }
 
+func TestTryAcquire(t *testing.T) {
+	t.Run("acquires when free", func(t *testing.T) {
+		g := New(limit)
+		for i := range limit {
+			if !g.TryAcquire() {
+				t.Fatalf("TryAcquire returned false with a free slot (attempt %d)", i)
+			}
+		}
+		if held := g.Held(); held != limit {
+			t.Errorf("Held=%d, want %d", held, limit)
+		}
+	})
+	t.Run("fails when full, does not block", func(t *testing.T) {
+		g := New(limit)
+		for range limit {
+			if !g.TryAcquire() {
+				t.Fatal("TryAcquire returned false with a free slot")
+			}
+		}
+
+		done := make(chan bool, 1)
+		go func() {
+			done <- g.TryAcquire()
+		}()
+
+		select {
+		case ok := <-done:
+			if ok {
+				t.Error("TryAcquire returned true although the Gate was full")
+			}
+		case <-time.After(100 * time.Millisecond):
+			t.Fatal("TryAcquire blocked instead of returning immediately")
+		}
+		if held := g.Held(); held != limit {
+			t.Errorf("Held=%d should be equal to limit=%d", held, limit)
+		}
+	})
+	t.Run("fails after Close", func(t *testing.T) {
+		g := New(limit)
+		g.Close()
+		if g.TryAcquire() {
+			t.Error("TryAcquire returned true after Close")
+		}
+		if held := g.Held(); held != 0 {
+			t.Errorf("Held=%d, want 0", held)
+		}
+	})
+	t.Run("fails after Drain", func(t *testing.T) {
+		g := New(limit)
+		g.Drain()
+		if g.TryAcquire() {
+			t.Error("TryAcquire returned true after Drain")
+		}
+	})
+}
+
 func TestRelease(t *testing.T) {
 	t.Run("base usage", func(t *testing.T) {
 		g := New(limit)
@@ -904,35 +960,55 @@ func TestPendingNotLeakedOnFailure(t *testing.T) {
 // every Release has landed, and nothing is granted afterwards. measured on g.pending under
 // g.mu rather than a counter the test keeps itself, since a shadow counter decremented after
 // g.Release() returns lags the real release and fails for no reason.
-func TestNoGrantAfterWaitReturns(t *testing.T) {
+func TestNoGrantAfterDrainReturns(t *testing.T) {
 	for trial := range 300 {
 		g := New(4)
-		var waitDone, lateGrant atomic.Int64
+		var drainDone, lateGrant atomic.Int64
 		var wg sync.WaitGroup
 
 		for i := range 12 {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				for {
-					var err error
-					if i%2 == 0 {
-						err = g.Acquire()
-					} else {
-						err = g.AcquireContext(context.Background())
+				switch i % 3 {
+				case 0:
+					for {
+						if err := g.Acquire(); err != nil {
+							return
+						}
+						if drainDone.Load() == 1 {
+							lateGrant.Add(1)
+						}
+						g.Release()
 					}
-					if err != nil {
-						return
+				case 1:
+					for {
+						if err := g.AcquireContext(context.Background()); err != nil {
+							return
+						}
+						if drainDone.Load() == 1 {
+							lateGrant.Add(1)
+						}
+						g.Release()
 					}
-					if waitDone.Load() == 1 {
-						lateGrant.Add(1)
+				default:
+					for {
+						if !g.TryAcquire() {
+							if drainDone.Load() == 1 {
+								return
+							}
+							continue
+						}
+						if drainDone.Load() == 1 {
+							lateGrant.Add(1)
+						}
+						g.Release()
 					}
-					g.Release()
 				}
 			}()
 		}
 		g.Drain()
-		waitDone.Store(1)
+		drainDone.Store(1)
 
 		g.mu.Lock()
 		pending := g.pending
