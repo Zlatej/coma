@@ -35,7 +35,7 @@ for _, task := range tasks {
     }()
 }
 
-fmt.Printf("currently running %d goroutines\n", gate.RunningCount())
+fmt.Printf("currently holding %d slots\n", gate.Held())
 
 gate.Wait() // blocks until all slots are released
 ```

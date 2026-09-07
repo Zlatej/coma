@@ -29,8 +29,8 @@ func TestNew(t *testing.T) {
 			t.Fatalf("New(%d): Acquire blocked, max was not round up to 1", max)
 		}
 
-		if cnt := g.RunningCount(); cnt != 1 {
-			t.Errorf("New(%d): RunningCount=%d, want 1", max, cnt)
+		if cnt := g.Held(); cnt != 1 {
+			t.Errorf("New(%d): Held=%d, want 1", max, cnt)
 		}
 
 		secondErr := make(chan error, 1)
@@ -70,8 +70,8 @@ func TestAcquire(t *testing.T) {
 		case <-time.After(100 * time.Millisecond):
 			// expected
 		}
-		if actual := g.RunningCount(); actual != limit {
-			t.Errorf("RunningCount=%d should be equal to limit=%d", actual, limit)
+		if actual := g.Held(); actual != limit {
+			t.Errorf("Held=%d should be equal to limit=%d", actual, limit)
 		}
 
 		g.Release()
@@ -85,8 +85,8 @@ func TestAcquire(t *testing.T) {
 		case <-time.After(time.Second):
 			t.Errorf("Acquire seems to be blocked even after a slot was released")
 		}
-		if actual := g.RunningCount(); actual != limit {
-			t.Errorf("after Release RunningCount=%d should be equal to limit=%d", actual, limit)
+		if actual := g.Held(); actual != limit {
+			t.Errorf("after Release Held=%d should be equal to limit=%d", actual, limit)
 		}
 	})
 	t.Run("after Wait called", func(t *testing.T) {
@@ -155,8 +155,8 @@ func TestAcquireContext(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 		// expected
 	}
-	if actual := g.RunningCount(); actual != limit {
-		t.Errorf("RunningCount=%d should be equal to limit=%d", actual, limit)
+	if actual := g.Held(); actual != limit {
+		t.Errorf("Held=%d should be equal to limit=%d", actual, limit)
 	}
 
 	g.Release()
@@ -170,8 +170,8 @@ func TestAcquireContext(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Errorf("AcquireContext seems to be blocked even after a slot was released")
 	}
-	if actual := g.RunningCount(); actual != limit {
-		t.Errorf("after Release RunningCount=%d should be equal to limit=%d", actual, limit)
+	if actual := g.Held(); actual != limit {
+		t.Errorf("after Release Held=%d should be equal to limit=%d", actual, limit)
 	}
 
 	go func() {
@@ -192,8 +192,8 @@ func TestAcquireContext(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Errorf("AcquireContext seems to be blocked even after canceling context")
 	}
-	if actual := g.RunningCount(); actual != limit {
-		t.Errorf("RunningCount=%d after cancel should be equal to limit=%d", actual, limit)
+	if actual := g.Held(); actual != limit {
+		t.Errorf("Held=%d after cancel should be equal to limit=%d", actual, limit)
 	}
 }
 
@@ -210,11 +210,11 @@ func TestRelease(t *testing.T) {
 				g.Release()
 			}
 			want += step
-			if got := g.RunningCount(); got != want {
-				t.Fatalf("step %d: RunningCount=%d, want %d", i, got, want)
+			if got := g.Held(); got != want {
+				t.Fatalf("step %d: Held=%d, want %d", i, got, want)
 			}
 		}
-		if got := g.RunningCount(); got != 0 {
+		if got := g.Held(); got != 0 {
 			t.Errorf("all releases were called, but %d is still held", got)
 		}
 	})
@@ -232,19 +232,19 @@ func TestRelease(t *testing.T) {
 	})
 }
 
-func TestRunningCount(t *testing.T) {
+func TestHeld(t *testing.T) {
 	t.Run("init", func(t *testing.T) {
 		g := New(limit)
-		if cnt := g.RunningCount(); cnt != 0 {
-			t.Errorf("RunningCount is %d, should be 0", cnt)
+		if cnt := g.Held(); cnt != 0 {
+			t.Errorf("Held is %d, should be 0", cnt)
 		}
 	})
 	t.Run("sequential", func(t *testing.T) {
 		g := New(limit)
 
 		for i := range limit {
-			if cur := g.RunningCount(); cur != i {
-				t.Errorf("Acquire: RunningCount returned %d, expected is `%d", cur, i)
+			if cur := g.Held(); cur != i {
+				t.Errorf("Acquire: Held returned %d, expected is `%d", cur, i)
 			}
 			if err := g.Acquire(); err != nil {
 				t.Fatalf("Acquire: %v", err)
@@ -252,14 +252,14 @@ func TestRunningCount(t *testing.T) {
 		}
 
 		for i := limit; i != 0; i-- {
-			if cur := g.RunningCount(); cur != i {
-				t.Errorf("Release: RunningCount returned %d, expected is %d", cur, i)
+			if cur := g.Held(); cur != i {
+				t.Errorf("Release: Held returned %d, expected is %d", cur, i)
 			}
 			g.Release()
 		}
 
-		if cur := g.RunningCount(); cur != 0 {
-			t.Errorf("RunningCount returned %d, expected is 0", cur)
+		if cur := g.Held(); cur != 0 {
+			t.Errorf("Held returned %d, expected is 0", cur)
 		}
 	})
 	t.Run("parallel", func(t *testing.T) {
@@ -272,8 +272,8 @@ func TestRunningCount(t *testing.T) {
 		go func() {
 			defer monitor.Done()
 			for !done.Load() {
-				if cnt := g.RunningCount(); cnt < 0 || cnt > limit {
-					t.Errorf("RunningCount=%d exceeded the limit=%d", cnt, limit)
+				if cnt := g.Held(); cnt < 0 || cnt > limit {
+					t.Errorf("Held=%d exceeded the limit=%d", cnt, limit)
 					return
 				} else if cnt > int(peak.Load()) {
 					peak.Store(int32(cnt))
@@ -298,8 +298,8 @@ func TestRunningCount(t *testing.T) {
 		done.Store(true)
 		monitor.Wait()
 
-		if cnt := g.RunningCount(); cnt != 0 {
-			t.Errorf("RunningCount is %d, should be 0", cnt)
+		if cnt := g.Held(); cnt != 0 {
+			t.Errorf("Held is %d, should be 0", cnt)
 		}
 		if peak.Load() != limit {
 			t.Errorf("peak goroutines count=%d is not at the limit=%d", peak.Load(), limit)
@@ -317,8 +317,8 @@ func TestRunningCount(t *testing.T) {
 			}()
 		}
 		g.Wait()
-		if cnt := g.RunningCount(); cnt != 0 {
-			t.Errorf("RunningCount is %d, should be 0", cnt)
+		if cnt := g.Held(); cnt != 0 {
+			t.Errorf("Held is %d, should be 0", cnt)
 		}
 	})
 	t.Run("ctx cancel", func(t *testing.T) {
@@ -345,8 +345,8 @@ func TestRunningCount(t *testing.T) {
 		wg.Wait()
 		g.Wait()
 
-		if cnt := g.RunningCount(); cnt != 0 {
-			t.Errorf("RunningCount is %d, should be 0", cnt)
+		if cnt := g.Held(); cnt != 0 {
+			t.Errorf("Held is %d, should be 0", cnt)
 		}
 	})
 }

@@ -115,10 +115,10 @@ func (g *Gate) Wait() {
 	}
 }
 
-// RunningCount returns the number of currently held slots: those for which [Gate.Acquire] or
+// Held returns the number of currently held slots: those for which [Gate.Acquire] or
 // [Gate.AcquireContext] returned nil and [Gate.Release] has not yet been called.
 // Goroutines blocked in Acquire are not counted, so this is not necessarily the number of goroutines running.
-func (g *Gate) RunningCount() int {
+func (g *Gate) Held() int {
 	return len(g.sem)
 }
 
