@@ -57,9 +57,14 @@ func (g *Gate) Acquire() error {
 }
 
 // AcquireContext blocks until a slot is available and claims it for a new goroutine.
-// If context.Done() has been closed ctx.Err() is returned and if [Gate] has already been closed,
-// AcquireContext returns [ErrClosed].
+// If [Gate] has already been closed, AcquireContext returns [ErrClosed] and if context.Done() has been closed
+// ctx.Err() is returned.
 func (g *Gate) AcquireContext(ctx context.Context) error {
+	select {
+	case <-g.closed:
+		return ErrClosed
+	default:
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}

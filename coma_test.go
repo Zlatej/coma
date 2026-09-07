@@ -225,6 +225,18 @@ func TestAcquireContextTimeout(t *testing.T) {
 	}
 }
 
+func TestAcquireContextClosedTakesPrecedence(t *testing.T) {
+	g := New(limit)
+	g.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if err := g.AcquireContext(ctx); !errors.Is(err, ErrClosed) {
+		t.Errorf("AcquireContext returned %v, want ErrClosed even though ctx was also done", err)
+	}
+}
+
 func TestTryAcquire(t *testing.T) {
 	t.Run("acquires when free", func(t *testing.T) {
 		g := New(limit)
