@@ -21,32 +21,59 @@ go get github.com/zlatej/coma
 ## usage
 
 ```go
-cm := coma.New(5) // at most 5 goroutines at a time
+gate := coma.New(5) // at most 5 goroutines at a time
 
 for _, task := range tasks {
     // blocks until a slot is free and acquires it
-    if err := cm.AcquireContext(ctx); err != nil {
-        // error means either the context is done or Wait has been called
+    if err := gate.AcquireContext(ctx); err != nil {
+        // error means either the context is done or Drain has been called
         return
     }
     go func() {
-        defer cm.Release() // releases slot
+        defer gate.Release() // releases slot
         process(task)
     }()
 }
 
-fmt.Printf("currently running %d goroutines\n", cm.RunningCount())
+fmt.Printf("currently holding %d slots\n", gate.Held())
 
-cm.Wait() // blocks until all slots are released
+gate.Drain() // blocks until all slots are released
 ```
 
-no context? use `cm.Acquire()` instead
+no context? use `gate.Acquire()` instead
+
+## remote graceful shutdown
+
+if you want to close the Gate from one place, but still wait until all tasks are done in a different place.
+
+```go
+gate := coma.New(5) // at most 5 goroutines at a time
+
+go func() {
+    <-sigint
+    gate.Close() // close from remote call
+}()
+
+for {
+    task := getTask()
+    if err := gate.Acquire(); err != nil { // returns ErrClosed after gate.Close()
+        break
+    }
+    go func() {
+        defer gate.Release()
+        process(task)
+    }()
+}
+
+gate.Drain() // already closed, just wait until all slots are released
+```
 
 ## notes
 
 - `New` treats a `max` of less than 1 as 1.
-- `Wait` is terminal: once called, the manager cannot be reused, `Acquire`/`AcquireContext` will return `ErrClosed`.
-- `Wait` can safely be called any number of times, including concurrently from multiple goroutines.
+- `Close` is terminal: once called, the Gate cannot be reused, `Acquire`/`AcquireContext` will return `ErrClosed`.
+- `Drain` behaves like `Close` but then blocks until all slots are released.
+- `Drain` and `Close` can be combined and can safely be called any number of times, including concurrently from multiple goroutines.
 - every successful `Acquire`/`AcquireContext` must be matched by exactly one `Release`. An unmatched `Release` panics when no slot is held.
 
 ## license
