@@ -1,8 +1,12 @@
 package coma
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"os"
+	"os/exec"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -91,7 +95,7 @@ func TestAcquire(t *testing.T) {
 	})
 	t.Run("after Wait called", func(t *testing.T) {
 		var (
-			g        = New(5)
+			g         = New(5)
 			ctx       = context.Background()
 			total     = 2000
 			failed    = 0
@@ -116,7 +120,7 @@ func TestAcquire(t *testing.T) {
 
 	t.Run("after Context canceled", func(t *testing.T) {
 		var (
-			g        = New(5)
+			g         = New(5)
 			total     = 2000
 			failedCtx = 0
 		)
@@ -194,6 +198,30 @@ func TestAcquireContext(t *testing.T) {
 	}
 	if actual := g.Held(); actual != limit {
 		t.Errorf("Held=%d after cancel should be equal to limit=%d", actual, limit)
+	}
+}
+
+func TestAcquireContextTimeout(t *testing.T) {
+	g := New(limit)
+	for range limit {
+		if err := g.Acquire(); err != nil {
+			t.Fatalf("Acquire: %v", err)
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	err := g.AcquireContext(ctx)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("AcquireContext returned %v instead of context.DeadlineExceeded", err)
+	}
+	if elapsed := time.Since(start); elapsed < 50*time.Millisecond {
+		t.Errorf("AcquireContext returned after %v, want at least the 50ms deadline", elapsed)
+	}
+	if actual := g.Held(); actual != limit {
+		t.Errorf("Held=%d should be equal to limit=%d", actual, limit)
 	}
 }
 
@@ -594,6 +622,332 @@ func TestWait(t *testing.T) {
 		close(start)
 		wg.Wait()
 	})
+	t.Run("concurrent calls stress", func(t *testing.T) {
+		for range 200 {
+			g := New(limit)
+			if err := g.Acquire(); err != nil {
+				t.Fatalf("Acquire: %v", err)
+			}
+			var wg sync.WaitGroup
+			start := make(chan struct{})
+			for range 8 {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					<-start
+					g.Wait()
+				}()
+			}
+			close(start)
+			go g.Release()
+			wg.Wait()
+		}
+	})
+}
+
+func TestGo(t *testing.T) {
+	t.Run("respects the limit", func(t *testing.T) {
+		g := New(limit)
+		var monitor sync.WaitGroup
+		var done atomic.Bool
+		var peak atomic.Int32
+
+		monitor.Add(1)
+		go func() {
+			defer monitor.Done()
+			for !done.Load() {
+				if cnt := g.Held(); cnt > int(peak.Load()) {
+					peak.Store(int32(cnt))
+				}
+				time.Sleep(5 * time.Millisecond)
+			}
+		}()
+
+		for range limit * 3 {
+			if err := g.Go(func() {
+				time.Sleep(100 * time.Millisecond)
+			}); err != nil {
+				t.Fatalf("Go: %v", err)
+			}
+		}
+
+		g.Wait()
+		done.Store(true)
+		monitor.Wait()
+
+		if peak.Load() > limit {
+			t.Errorf("peak concurrency=%d, want %d", peak.Load(), limit)
+		}
+	})
+	t.Run("returns ErrClosed after Wait", func(t *testing.T) {
+		g := New(limit)
+		g.Wait()
+		if err := g.Go(func() {
+			t.Error("f should not run once the Gate is closed")
+		}); !errors.Is(err, ErrClosed) {
+			t.Errorf("Go returned %v instead of ErrClosed", err)
+		}
+	})
+}
+
+// TestGoPanic must run in a child process: an unrecovered panic in the goroutine Go spawns
+// is fatal to the whole program, so the only way to observe it is to run it out-of-process
+// and inspect the exit. mirrors sync.WaitGroup's own TestIssue76126.
+func TestGoPanic(t *testing.T) {
+	if os.Getenv("COMA_TEST_GO_PANIC_CHILD") == "1" {
+		g := New(limit)
+		if err := g.Go(func() {
+			panic("boom")
+		}); err != nil {
+			t.Fatalf("Go: %v", err)
+		}
+		g.Wait()               // must never return: the panic should terminate the process first
+		panic("Wait returned") // unreachable if Release was correctly skipped
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=^TestGoPanic$")
+	cmd.Env = append(os.Environ(), "COMA_TEST_GO_PANIC_CHILD=1")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err == nil {
+		t.Fatal("child process exited successfully, want a panic")
+	}
+	if !strings.Contains(stderr.String(), "panic: boom") {
+		t.Errorf("missing panic: boom\n%s", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "Wait returned") {
+		t.Error("Wait returned before the panic terminated the process")
+	}
+}
+
+func TestGoContext(t *testing.T) {
+	t.Run("respects the limit", func(t *testing.T) {
+		g := New(limit)
+		var monitor sync.WaitGroup
+		var done atomic.Bool
+		var peak atomic.Int32
+
+		monitor.Add(1)
+		go func() {
+			defer monitor.Done()
+			for !done.Load() {
+				if cnt := g.Held(); cnt > int(peak.Load()) {
+					peak.Store(int32(cnt))
+				}
+				time.Sleep(5 * time.Millisecond)
+			}
+		}()
+
+		ctx := context.Background()
+		for range limit * 3 {
+			if err := g.GoContext(ctx, func() {
+				time.Sleep(100 * time.Millisecond)
+			}); err != nil {
+				t.Fatalf("GoContext: %v", err)
+			}
+		}
+
+		g.Wait()
+		done.Store(true)
+		monitor.Wait()
+
+		if peak.Load() != limit {
+			t.Errorf("peak concurrency=%d, want %d", peak.Load(), limit)
+		}
+	})
+	t.Run("returns ErrClosed after Wait", func(t *testing.T) {
+		g := New(limit)
+		g.Wait()
+		if err := g.GoContext(context.Background(), func() {
+			t.Error("f should not run once the Gate is closed")
+		}); !errors.Is(err, ErrClosed) {
+			t.Errorf("GoContext returned %v instead of ErrClosed", err)
+		}
+	})
+	t.Run("already canceled context", func(t *testing.T) {
+		g := New(limit)
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		if err := g.GoContext(ctx, func() {
+			t.Error("f should not run when ctx is already canceled")
+		}); !errors.Is(err, context.Canceled) {
+			t.Errorf("GoContext returned %v instead of context.Canceled", err)
+		}
+		if cnt := g.Held(); cnt != 0 {
+			t.Errorf("Held=%d, want 0", cnt)
+		}
+	})
+	t.Run("canceled while waiting for a slot", func(t *testing.T) {
+		g := New(1)
+		if err := g.Acquire(); err != nil { // fill the only slot
+			t.Fatalf("Acquire: %v", err)
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		errCh := make(chan error, 1)
+		go func() {
+			errCh <- g.GoContext(ctx, func() {
+				t.Error("f should not run once ctx is canceled while waiting")
+			})
+		}()
+
+		time.Sleep(30 * time.Millisecond)
+		cancel()
+
+		select {
+		case err := <-errCh:
+			if !errors.Is(err, context.Canceled) {
+				t.Errorf("GoContext returned %v instead of context.Canceled", err)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("GoContext did not return after ctx was canceled")
+		}
+
+		g.Release()
+	})
+}
+
+// TestGoContextPanic mirrors TestGoPanic for the AcquireContext-based path.
+func TestGoContextPanic(t *testing.T) {
+	if os.Getenv("COMA_TEST_GOCONTEXT_PANIC_CHILD") == "1" {
+		g := New(limit)
+		if err := g.GoContext(context.Background(), func() {
+			panic("boom")
+		}); err != nil {
+			t.Fatalf("GoContext: %v", err)
+		}
+		g.Wait()               // must never return: the panic should terminate the process first
+		panic("Wait returned") // unreachable if Release was correctly skipped
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=^TestGoContextPanic$")
+	cmd.Env = append(os.Environ(), "COMA_TEST_GOCONTEXT_PANIC_CHILD=1")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err == nil {
+		t.Fatal("child process exited successfully, want a panic")
+	}
+	if !strings.Contains(stderr.String(), "panic: boom") {
+		t.Errorf("missing panic: boom\n%s", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "Wait returned") {
+		t.Error("Wait returned before the panic terminated the process")
+	}
+}
+
+// every failed Acquire/AcquireContext must leave pending exactly as it found it.
+// a leak is invisible until Wait deadlocks, so assert on pending directly.
+func TestPendingNotLeakedOnFailure(t *testing.T) {
+	t.Run("ctx canceled while blocked", func(t *testing.T) {
+		g := New(1)
+		if err := g.Acquire(); err != nil { // fill the only slot
+			t.Fatalf("Acquire: %v", err)
+		}
+		for range 50 {
+			ctx, cancel := context.WithCancel(context.Background())
+			go func() {
+				time.Sleep(time.Millisecond)
+				cancel()
+			}()
+			if err := g.AcquireContext(ctx); err == nil {
+				t.Fatal("AcquireContext should have failed")
+			}
+			cancel()
+		}
+		g.mu.Lock()
+		pending := g.pending
+		g.mu.Unlock()
+		if pending != 1 { // only the one live holder
+			t.Errorf("pending=%d after 50 failed AcquireContext, want 1", pending)
+		}
+		g.Release()
+	})
+
+	t.Run("closed while blocked", func(t *testing.T) {
+		g := New(1)
+		if err := g.Acquire(); err != nil {
+			t.Fatalf("Acquire: %v", err)
+		}
+		errs := make(chan error, 20)
+		for range 10 {
+			go func() { errs <- g.Acquire() }()
+			go func() { errs <- g.AcquireContext(context.Background()) }()
+		}
+		time.Sleep(50 * time.Millisecond)
+
+		waited := make(chan struct{})
+		go func() { g.Wait(); close(waited) }()
+
+		for range 20 {
+			if err := <-errs; err == nil {
+				t.Error("blocked acquire should have failed once Wait was called")
+			}
+		}
+		g.Release()
+
+		// a leaked pending count makes this Wait hang forever
+		select {
+		case <-waited:
+		case <-time.After(2 * time.Second):
+			g.mu.Lock()
+			p := g.pending
+			g.mu.Unlock()
+			t.Fatalf("Wait deadlocked: pending leaked, stuck at %d", p)
+		}
+	})
+}
+
+// TestNoGrantAfterWaitReturns asserts the real invariant behind Wait: it returns only after
+// every Release has landed, and nothing is granted afterwards. measured on g.pending under
+// g.mu rather than a counter the test keeps itself, since a shadow counter decremented after
+// g.Release() returns lags the real release and fails for no reason.
+func TestNoGrantAfterWaitReturns(t *testing.T) {
+	for trial := range 300 {
+		g := New(4)
+		var waitDone, lateGrant atomic.Int64
+		var wg sync.WaitGroup
+
+		for i := range 12 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for {
+					var err error
+					if i%2 == 0 {
+						err = g.Acquire()
+					} else {
+						err = g.AcquireContext(context.Background())
+					}
+					if err != nil {
+						return
+					}
+					if waitDone.Load() == 1 {
+						lateGrant.Add(1)
+					}
+					g.Release()
+				}
+			}()
+		}
+		g.Wait()
+		waitDone.Store(1)
+
+		g.mu.Lock()
+		pending := g.pending
+		g.mu.Unlock()
+		if pending != 0 {
+			t.Fatalf("trial %d: Wait returned with pending=%d", trial, pending)
+		}
+		if held := g.Held(); held != 0 {
+			t.Fatalf("trial %d: Wait returned with %d slots still held", trial, held)
+		}
+		wg.Wait()
+		if n := lateGrant.Load(); n != 0 {
+			t.Fatalf("trial %d: %d slots granted after Wait returned", trial, n)
+		}
+	}
 }
 
 func mustPanic(t *testing.T, f func(), what string) (p any) {
