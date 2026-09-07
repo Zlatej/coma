@@ -79,8 +79,8 @@ func (g *Gate) AcquireContext(ctx context.Context) error {
 	}
 }
 
-// TryAcquire acquires the slot without blocking.
-// On success, returns true. On failure, returns false and leaves the [Gate] unchanged.
+// TryAcquire claims a slot if one is available, without blocking.
+// On success, returns true. If capacity is full or [Gate] is closed, returns false and leaves the [Gate] unchanged.
 func (g *Gate) TryAcquire() bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
