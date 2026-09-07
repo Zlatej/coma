@@ -26,7 +26,7 @@ gate := coma.New(5) // at most 5 goroutines at a time
 for _, task := range tasks {
     // blocks until a slot is free and acquires it
     if err := gate.AcquireContext(ctx); err != nil {
-        // error means either the context is done or Wait has been called
+        // error means either the context is done or Drain has been called
         return
     }
     go func() {
@@ -37,7 +37,7 @@ for _, task := range tasks {
 
 fmt.Printf("currently holding %d slots\n", gate.Held())
 
-gate.Wait() // blocks until all slots are released
+gate.Drain() // blocks until all slots are released
 ```
 
 no context? use `gate.Acquire()` instead
@@ -65,15 +65,15 @@ for {
     }()
 }
 
-gate.Wait() // already closed, just wait until all slots are released
+gate.Drain() // already closed, just wait until all slots are released
 ```
 
 ## notes
 
 - `New` treats a `max` of less than 1 as 1.
 - `Close` is terminal: once called, the Gate cannot be reused, `Acquire`/`AcquireContext` will return `ErrClosed`.
-- `Wait` behaves like `Close` but then blocks until all slots are released.
-- `Wait` and `Close` can be combined and can safely be called any number of times, including concurrently from multiple goroutines.
+- `Drain` behaves like `Close` but then blocks until all slots are released.
+- `Drain` and `Close` can be combined and can safely be called any number of times, including concurrently from multiple goroutines.
 - every successful `Acquire`/`AcquireContext` must be matched by exactly one `Release`. An unmatched `Release` panics when no slot is held.
 
 ## license

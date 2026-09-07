@@ -93,7 +93,7 @@ func TestAcquire(t *testing.T) {
 			t.Errorf("after Release Held=%d should be equal to limit=%d", actual, limit)
 		}
 	})
-	t.Run("after Wait called", func(t *testing.T) {
+	t.Run("after Drain called", func(t *testing.T) {
 		var (
 			g         = New(5)
 			ctx       = context.Background()
@@ -101,7 +101,7 @@ func TestAcquire(t *testing.T) {
 			failed    = 0
 			failedCtx = 0
 		)
-		g.Wait()
+		g.Drain()
 		for range total {
 			if err := g.Acquire(); err == nil {
 				failed++
@@ -333,7 +333,7 @@ func TestHeld(t *testing.T) {
 			t.Errorf("peak goroutines count=%d is not at the limit=%d", peak.Load(), limit)
 		}
 	})
-	t.Run("with Wait()", func(t *testing.T) {
+	t.Run("with Drain()", func(t *testing.T) {
 		g := New(limit)
 		for range limit * 2 {
 			if err := g.Acquire(); err != nil {
@@ -344,7 +344,7 @@ func TestHeld(t *testing.T) {
 				time.Sleep(100 * time.Millisecond)
 			}()
 		}
-		g.Wait()
+		g.Drain()
 		if cnt := g.Held(); cnt != 0 {
 			t.Errorf("Held is %d, should be 0", cnt)
 		}
@@ -371,7 +371,7 @@ func TestHeld(t *testing.T) {
 		time.Sleep(30 * time.Millisecond)
 		cancel()
 		wg.Wait()
-		g.Wait()
+		g.Drain()
 
 		if cnt := g.Held(); cnt != 0 {
 			t.Errorf("Held is %d, should be 0", cnt)
@@ -450,7 +450,7 @@ func TestClose(t *testing.T) {
 		g.Close()
 
 		g.Release()
-		g.Wait()
+		g.Drain()
 	})
 	t.Run("concurrent calls", func(t *testing.T) {
 		for range 200 {
@@ -497,7 +497,7 @@ func TestWait(t *testing.T) {
 
 		time.Sleep(50 * time.Millisecond)
 		go func() {
-			g.Wait()
+			g.Drain()
 		}()
 		<-g.closed
 		g.Release()
@@ -505,7 +505,7 @@ func TestWait(t *testing.T) {
 	})
 	t.Run("closing", func(t *testing.T) {
 		g := New(limit)
-		g.Wait()
+		g.Drain()
 		acqErr := make(chan error)
 
 		go func() {
@@ -517,7 +517,7 @@ func TestWait(t *testing.T) {
 				t.Errorf("Acquire returned %v instead of ErrClosed", err)
 			}
 		case <-time.After(100 * time.Millisecond):
-			t.Error("Acquire blocked after closing Wait()")
+			t.Error("Acquire blocked after closing Drain()")
 		}
 
 		go func() {
@@ -529,7 +529,7 @@ func TestWait(t *testing.T) {
 				t.Errorf("AcquireContext returned %v instead of ErrClosed", err)
 			}
 		case <-time.After(100 * time.Millisecond):
-			t.Error("Acquire blocked after closing Wait()")
+			t.Error("Acquire blocked after closing Drain()")
 		}
 	})
 	t.Run("called multiple times", func(t *testing.T) {
@@ -546,36 +546,36 @@ func TestWait(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			g.Wait()
+			g.Drain()
 			done1 <- true
 		}()
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			g.Wait()
+			g.Drain()
 			done2 <- true
 		}()
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			g.Wait()
+			g.Drain()
 			done3 <- true
 		}()
 
 		select {
 		case <-done1:
-			t.Error("first Wait call did not block")
+			t.Error("first Drain call did not block")
 		case <-done2:
-			t.Error("second Wait call did not block")
+			t.Error("second Drain call did not block")
 		case <-done3:
-			t.Error("third Wait call did not block")
+			t.Error("third Drain call did not block")
 		case <-time.After(300 * time.Millisecond):
 		}
 
 		g.Release()
 		wg.Wait()
 	})
-	t.Run("waits", func(t *testing.T) {
+	t.Run("blocks", func(t *testing.T) {
 		g := New(limit)
 		var done atomic.Bool
 
@@ -588,7 +588,7 @@ func TestWait(t *testing.T) {
 			done.Store(true)
 		}()
 
-		g.Wait()
+		g.Drain()
 		if !done.Load() {
 			t.Error("goroutine is not done")
 		}
@@ -613,7 +613,7 @@ func TestWait(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				<-start
-				g.Wait()
+				g.Drain()
 				if !done.Load() {
 					t.Error("goroutine is not done")
 				}
@@ -635,7 +635,7 @@ func TestWait(t *testing.T) {
 				go func() {
 					defer wg.Done()
 					<-start
-					g.Wait()
+					g.Drain()
 				}()
 			}
 			close(start)
@@ -671,7 +671,7 @@ func TestGo(t *testing.T) {
 			}
 		}
 
-		g.Wait()
+		g.Drain()
 		done.Store(true)
 		monitor.Wait()
 
@@ -681,7 +681,7 @@ func TestGo(t *testing.T) {
 	})
 	t.Run("returns ErrClosed after Wait", func(t *testing.T) {
 		g := New(limit)
-		g.Wait()
+		g.Drain()
 		if err := g.Go(func() {
 			t.Error("f should not run once the Gate is closed")
 		}); !errors.Is(err, ErrClosed) {
@@ -701,8 +701,8 @@ func TestGoPanic(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("Go: %v", err)
 		}
-		g.Wait()               // must never return: the panic should terminate the process first
-		panic("Wait returned") // unreachable if Release was correctly skipped
+		g.Drain()               // must never return: the panic should terminate the process first
+		panic("Drain returned") // unreachable if Release was correctly skipped
 	}
 
 	cmd := exec.Command(os.Args[0], "-test.run=^TestGoPanic$")
@@ -716,8 +716,8 @@ func TestGoPanic(t *testing.T) {
 	if !strings.Contains(stderr.String(), "panic: boom") {
 		t.Errorf("missing panic: boom\n%s", stderr.String())
 	}
-	if strings.Contains(stderr.String(), "Wait returned") {
-		t.Error("Wait returned before the panic terminated the process")
+	if strings.Contains(stderr.String(), "Drain returned") {
+		t.Error("Drain returned before the panic terminated the process")
 	}
 }
 
@@ -748,7 +748,7 @@ func TestGoContext(t *testing.T) {
 			}
 		}
 
-		g.Wait()
+		g.Drain()
 		done.Store(true)
 		monitor.Wait()
 
@@ -758,7 +758,7 @@ func TestGoContext(t *testing.T) {
 	})
 	t.Run("returns ErrClosed after Wait", func(t *testing.T) {
 		g := New(limit)
-		g.Wait()
+		g.Drain()
 		if err := g.GoContext(context.Background(), func() {
 			t.Error("f should not run once the Gate is closed")
 		}); !errors.Is(err, ErrClosed) {
@@ -818,8 +818,8 @@ func TestGoContextPanic(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("GoContext: %v", err)
 		}
-		g.Wait()               // must never return: the panic should terminate the process first
-		panic("Wait returned") // unreachable if Release was correctly skipped
+		g.Drain()               // must never return: the panic should terminate the process first
+		panic("Drain returned") // unreachable if Release was correctly skipped
 	}
 
 	cmd := exec.Command(os.Args[0], "-test.run=^TestGoContextPanic$")
@@ -833,13 +833,13 @@ func TestGoContextPanic(t *testing.T) {
 	if !strings.Contains(stderr.String(), "panic: boom") {
 		t.Errorf("missing panic: boom\n%s", stderr.String())
 	}
-	if strings.Contains(stderr.String(), "Wait returned") {
-		t.Error("Wait returned before the panic terminated the process")
+	if strings.Contains(stderr.String(), "Drain returned") {
+		t.Error("Drain returned before the panic terminated the process")
 	}
 }
 
 // every failed Acquire/AcquireContext must leave pending exactly as it found it.
-// a leak is invisible until Wait deadlocks, so assert on pending directly.
+// a leak is invisible until Drain deadlocks, so assert on pending directly.
 func TestPendingNotLeakedOnFailure(t *testing.T) {
 	t.Run("ctx canceled while blocked", func(t *testing.T) {
 		g := New(1)
@@ -879,23 +879,23 @@ func TestPendingNotLeakedOnFailure(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 
 		waited := make(chan struct{})
-		go func() { g.Wait(); close(waited) }()
+		go func() { g.Drain(); close(waited) }()
 
 		for range 20 {
 			if err := <-errs; err == nil {
-				t.Error("blocked acquire should have failed once Wait was called")
+				t.Error("blocked acquire should have failed once Drain was called")
 			}
 		}
 		g.Release()
 
-		// a leaked pending count makes this Wait hang forever
+		// a leaked pending count makes this Drain hang forever
 		select {
 		case <-waited:
 		case <-time.After(2 * time.Second):
 			g.mu.Lock()
 			p := g.pending
 			g.mu.Unlock()
-			t.Fatalf("Wait deadlocked: pending leaked, stuck at %d", p)
+			t.Fatalf("Drain deadlocked: pending leaked, stuck at %d", p)
 		}
 	})
 }
@@ -931,21 +931,21 @@ func TestNoGrantAfterWaitReturns(t *testing.T) {
 				}
 			}()
 		}
-		g.Wait()
+		g.Drain()
 		waitDone.Store(1)
 
 		g.mu.Lock()
 		pending := g.pending
 		g.mu.Unlock()
 		if pending != 0 {
-			t.Fatalf("trial %d: Wait returned with pending=%d", trial, pending)
+			t.Fatalf("trial %d: Drain returned with pending=%d", trial, pending)
 		}
 		if held := g.Held(); held != 0 {
-			t.Fatalf("trial %d: Wait returned with %d slots still held", trial, held)
+			t.Fatalf("trial %d: Drain returned with %d slots still held", trial, held)
 		}
 		wg.Wait()
 		if n := lateGrant.Load(); n != 0 {
-			t.Fatalf("trial %d: %d slots granted after Wait returned", trial, n)
+			t.Fatalf("trial %d: %d slots granted after Drain returned", trial, n)
 		}
 	}
 }

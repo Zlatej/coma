@@ -8,7 +8,7 @@ import (
 )
 
 // ErrClosed is returned by [Gate.Acquire] and [Gate.AcquireContext]
-// when [Gate.Close] or [Gate.Wait] has been called.
+// when [Gate.Close] or [Gate.Drain] has been called.
 var ErrClosed = errors.New("coma: gate is closed")
 
 // Gate limits how many goroutines can run concurrently.
@@ -85,7 +85,7 @@ func (g *Gate) AcquireContext(ctx context.Context) error {
 //
 // Release panics when no slot is held at all.
 // An unmatched Release called while other goroutines are holding slots takes one of theirs instead, which allows
-// the limit to be exceeded and can make [Gate.Wait] return before those goroutines finish.
+// the limit to be exceeded and can make [Gate.Drain] return before those goroutines finish.
 // A later Release then panics in its place.
 func (g *Gate) Release() {
 	select {
@@ -97,16 +97,16 @@ func (g *Gate) Release() {
 }
 
 // Close closes [Gate] so it stops accepting acquires. Close is terminal, meaning Gate
-// cannot be reused, but [Gate.Wait] still can be called.
+// cannot be reused, but [Gate.Drain] still can be called.
 func (g *Gate) Close() {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.closeLocked()
 }
 
-// Wait closes [Gate] and waits until all goroutines are done. Wait is terminal,
-// meaning Gate cannot be reused. Wait is safe for concurrent use. A repeated call is a safe no-op.
-func (g *Gate) Wait() {
+// Drain closes [Gate] and blocks until all goroutines are done. Drain is terminal,
+// meaning Gate cannot be reused. Drain is safe for concurrent use. A repeated call is a safe no-op.
+func (g *Gate) Drain() {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.closeLocked()
@@ -131,8 +131,8 @@ func (g *Gate) Go(f func()) error {
 	go func() {
 		defer func() {
 			if x := recover(); x != nil {
-				// f panicked. Calling Release here could wake Wait while the panic is still processing.
-				// Wait would race the panic and potentially even exit the process before the panic completes.
+				// f panicked. Calling Release here could wake Drain while the panic is still processing.
+				// Drain would race the panic and potentially even exit the process before the panic completes.
 				// So we don't call Release and let the panic complete. Same behavior as sync.WaitGroup.Go().
 				panic(x)
 			}
@@ -153,8 +153,8 @@ func (g *Gate) GoContext(ctx context.Context, f func()) error {
 	go func() {
 		defer func() {
 			if x := recover(); x != nil {
-				// f panicked. Calling Release here could wake Wait while the panic is still processing.
-				// Wait would race the panic and potentially even exit the process before the panic completes.
+				// f panicked. Calling Release here could wake Drain while the panic is still processing.
+				// Drain would race the panic and potentially even exit the process before the panic completes.
 				// So we don't call Release and let the panic complete. Same behavior as sync.WaitGroup.Go().
 				panic(x)
 			}
